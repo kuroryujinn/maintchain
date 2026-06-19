@@ -1,0 +1,36 @@
+# Environment variables
+.env
+.env.*
+
+# Ignore all Markdown files except README.md
+*.md
+!README.md
+
+# Node
+node_modules/
+.next/
+node_modules/
+target/
+.next/
+dist/
+build/
+# Rust
+target/
+
+# Build files
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Windows
+*.pdb
+
+# IDE
+.vscode/
+.idea/

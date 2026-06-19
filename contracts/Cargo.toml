@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = [
+  "equipment-registry",
+  "maintenance-records",
+  "multi-party-approval",
+  "compliance-attestation",
+]
+
