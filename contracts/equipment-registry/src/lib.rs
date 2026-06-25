@@ -26,9 +26,6 @@ fn append_str(out: Bytes, s: &str) -> Bytes {
     out2
 }
 
-
-
-
 fn u32_be(env: &Env, v: u32) -> Bytes {
     let b = [
         ((v >> 24) & 0xFF) as u8,
@@ -57,7 +54,6 @@ fn sha256(env: &Env, preimage: &Bytes) -> BytesN<32> {
     env.crypto().sha256(preimage).into()
 }
 
-
 fn canonical_equipment_preimage(
     env: &Env,
     equipment_id: &BytesN<32>,
@@ -69,21 +65,18 @@ fn canonical_equipment_preimage(
     // SEP || equipment_id || metadata_hash || created_at || version
     let out = Bytes::new(env);
 
-    let mut out2 = append_str(out, EQUIPMENT_SEP);
+    let out2 = append_str(out, EQUIPMENT_SEP);
 
-    // BytesN<32> supports to_bytes() in this repo version.
     let eq_id_bytes: Bytes = equipment_id.to_bytes();
-    out2.append(&eq_id_bytes);
-
-    // owner omitted from preimage (repo soroban-sdk 26.1.0 lacks deterministic Address->Bytes API in this codebase)
-
     let md_bytes: Bytes = metadata_hash.to_bytes();
-    out2.append(&md_bytes);
 
-    out2.append(&u64_be(env, created_at));
-    out2.append(&u32_be(env, version));
+    let mut out3 = out2;
+    out3.append(&eq_id_bytes);
+    out3.append(&md_bytes);
+    out3.append(&u64_be(env, created_at));
+    out3.append(&u32_be(env, version));
 
-    out2
+    out3
 }
 
 fn compute_equipment_hash(
@@ -94,9 +87,14 @@ fn compute_equipment_hash(
     created_at: u64,
     version: u32,
 ) -> BytesN<32> {
-    // owner currently unused in preimage (SDK lacks deterministic Address->Bytes API here)
-    let preimage =
-        canonical_equipment_preimage(env, equipment_id, owner, metadata_hash, created_at, version);
+    let preimage = canonical_equipment_preimage(
+        env,
+        equipment_id,
+        owner,
+        metadata_hash,
+        created_at,
+        version,
+    );
     sha256(env, &preimage)
 }
 
@@ -108,14 +106,14 @@ impl EquipmentRegistry {
         owner: Address,
         metadata_hash: BytesN<32>,
     ) -> BytesN<32> {
-        // Latest version pointer existence check
         if env.storage().instance().has(&equipment_id) {
             panic!("Equipment already registered");
         }
 
         let created_at = env.ledger().timestamp();
         let version: u32 = 1;
-        let eq_hash = compute_equipment_hash(&env, &equipment_id, &owner, &metadata_hash, created_at, version);
+        let eq_hash =
+            compute_equipment_hash(&env, &equipment_id, &owner, &metadata_hash, created_at, version);
         let equipment_id_key = equipment_id.clone();
 
         let snap = EquipmentSnapshot {
@@ -152,8 +150,14 @@ impl EquipmentRegistry {
 
         let new_version = latest_version + 1;
         let created_at = env.ledger().timestamp();
-        let eq_hash =
-            compute_equipment_hash(&env, &equipment_id_key, &new_owner, &prev.metadata_hash, created_at, new_version);
+        let eq_hash = compute_equipment_hash(
+            &env,
+            &equipment_id_key,
+            &new_owner,
+            &prev.metadata_hash,
+            created_at,
+            new_version,
+        );
 
         let snap = EquipmentSnapshot {
             equipment_id: equipment_id_key.clone(),
@@ -184,6 +188,121 @@ impl EquipmentRegistry {
     pub fn get_equipment_version(env: Env, equipment_id: BytesN<32>, version: u32) -> EquipmentSnapshot {
         let key = (equipment_id, version);
         env.storage().instance().get(&key).expect("Equipment version not found")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+
+
+
+
+    fn owner_a(env: &Env) -> Address {
+        Address::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    }
+
+
+
+
+
+    fn owner_b(env: &Env) -> Address {
+        Address::from_str(
+            env,
+            "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        )
+    }
+
+
+
+
+    fn owner_default(env: &Env) -> Address {
+        Address::from_str(
+            env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        )
+    }
+
+
+
+    #[test]
+    fn test_register_equipment_stores_snapshot() {
+        let env = Env::default();
+
+
+        let equipment_id: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+        let owner: Address = owner_default(&env);
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[2u8; 32]);
+
+        let eq_hash = EquipmentRegistry::register_equipment(
+            env.clone(),
+            equipment_id.clone(),
+            owner.clone(),
+            metadata_hash.clone(),
+        );
+
+        let snap = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
+        assert_eq!(snap.equipment_id, equipment_id);
+        assert_eq!(snap.owner, owner);
+        assert_eq!(snap.metadata_hash, metadata_hash);
+        assert_eq!(snap.equipment_hash, eq_hash);
+        assert_eq!(snap.version, 1);
+        assert!(snap.created_at > 0);
+    }
+
+    #[test]
+    fn test_get_equipment_returns_latest_version() {
+        let env = Env::default();
+
+        let equipment_id: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
+        let owner1: Address = owner_a(&env);
+        let owner2: Address = owner_b(&env);
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[6u8; 32]);
+
+        let _ = EquipmentRegistry::register_equipment(
+            env.clone(),
+            equipment_id.clone(),
+            owner1.clone(),
+            metadata_hash.clone(),
+        );
+        let _ = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
+
+        let latest = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
+        assert_eq!(latest.owner, owner2);
+        assert_eq!(latest.version, 2);
+    }
+
+    #[test]
+    fn test_update_owner_creates_new_version_snapshot() {
+        let env = Env::default();
+
+        let equipment_id: BytesN<32> = BytesN::from_array(&env, &[7u8; 32]);
+        let owner1: Address = owner_a(&env);
+        let owner2: Address = owner_b(&env);
+        let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[11u8; 32]);
+
+        let h1 = EquipmentRegistry::register_equipment(
+            env.clone(),
+            equipment_id.clone(),
+            owner1.clone(),
+            metadata_hash.clone(),
+        );
+        let h2 = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
+        assert_ne!(h1, h2);
+
+        let v1 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 1);
+        let v2 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 2);
+
+        assert_eq!(v1.owner, owner1);
+        assert_eq!(v1.metadata_hash, metadata_hash);
+        assert_eq!(v1.equipment_hash, h1);
+        assert_eq!(v1.version, 1);
+
+        assert_eq!(v2.owner, owner2);
+        assert_eq!(v2.metadata_hash, metadata_hash);
+        assert_eq!(v2.equipment_hash, h2);
+        assert_eq!(v2.version, 2);
     }
 }
 

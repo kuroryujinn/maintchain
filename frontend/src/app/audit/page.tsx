@@ -1,20 +1,37 @@
 'use client';
 import { useSoroban } from '@/hooks/useSoroban';
+import { useState } from 'react';
 
 export default function AuditTimeline() {
+
   const { connectWallet, isConnected, callContract } = useSoroban();
 
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
   const handleCertify = async (id: string) => {
+    setTxHash(null);
+    setError(null);
+
     try {
-      await callContract('ATTESTATION_CONTRACT_ID', 'issue_certificate', [
+      const result = await callContract('ATTESTATION_CONTRACT_ID', 'issue_certificate', [
         id,
         'on_chain_cert_hash',
       ]);
-      alert('Compliance Certificate issued on-chain!');
-    } catch (error) {
-      alert('Certification failed');
+
+      const maybeHash =
+        (result as any)?.hash ??
+        (result as any)?.transactionHash ??
+        (result as any)?.result?.hash ??
+        null;
+
+      setTxHash(maybeHash);
+      if (!maybeHash) setError('Contract call succeeded but tx hash is not available from wallet result.');
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
     }
   };
+
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
