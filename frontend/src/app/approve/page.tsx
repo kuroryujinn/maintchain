@@ -1,10 +1,11 @@
 'use client';
 import { useState } from 'react';
 
+import WalletConnectPanel from '@/components/WalletConnectPanel';
 import { useSoroban } from '@/hooks/useSoroban';
 
 export default function ApprovalCenter() {
-  const { connectWallet, isConnected, callContract } = useSoroban();
+  const { isConnected, callContract } = useSoroban();
 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,17 +42,9 @@ export default function ApprovalCenter() {
     <div className="max-w-4xl mx-auto space-y-6">
       <h1 className="text-3xl font-bold">Approval Center</h1>
 
-      {!isConnected ? (
-        <div className="p-8 bg-blue-50 border border-blue-200 rounded-xl text-center">
-          <p className="mb-4">Connect your wallet to manage approvals</p>
-          <button
-            onClick={connectWallet}
-            className="bg-blue-600 text-white px-6 py-2 rounded-md"
-          >
-            Connect Wallet
-          </button>
-        </div>
-      ) : (
+      <WalletConnectPanel />
+
+      {isConnected && (
         <div className="space-y-4">
           {(error || txHash) && (
             <div

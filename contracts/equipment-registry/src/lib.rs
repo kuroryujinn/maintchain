@@ -194,13 +194,15 @@ impl EquipmentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Ledger as _;
 
 
 
 
 
     fn owner_a(env: &Env) -> Address {
-        Address::from_str(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        Address::generate(env)
     }
 
 
@@ -208,20 +210,14 @@ mod tests {
 
 
     fn owner_b(env: &Env) -> Address {
-        Address::from_str(
-            env,
-            "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-        )
+        Address::generate(env)
     }
 
 
 
 
     fn owner_default(env: &Env) -> Address {
-        Address::from_str(
-            env,
-            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-        )
+        Address::generate(env)
     }
 
 
@@ -229,80 +225,90 @@ mod tests {
     #[test]
     fn test_register_equipment_stores_snapshot() {
         let env = Env::default();
+        let contract_id = env.register(EquipmentRegistry, ());
+        env.ledger().set_timestamp(1234);
 
 
         let equipment_id: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
         let owner: Address = owner_default(&env);
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[2u8; 32]);
 
-        let eq_hash = EquipmentRegistry::register_equipment(
-            env.clone(),
-            equipment_id.clone(),
-            owner.clone(),
-            metadata_hash.clone(),
-        );
+        env.as_contract(&contract_id, || {
+            let eq_hash = EquipmentRegistry::register_equipment(
+                env.clone(),
+                equipment_id.clone(),
+                owner.clone(),
+                metadata_hash.clone(),
+            );
 
-        let snap = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
-        assert_eq!(snap.equipment_id, equipment_id);
-        assert_eq!(snap.owner, owner);
-        assert_eq!(snap.metadata_hash, metadata_hash);
-        assert_eq!(snap.equipment_hash, eq_hash);
-        assert_eq!(snap.version, 1);
-        assert!(snap.created_at > 0);
+            let snap = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
+            assert_eq!(snap.equipment_id, equipment_id);
+            assert_eq!(snap.owner, owner);
+            assert_eq!(snap.metadata_hash, metadata_hash);
+            assert_eq!(snap.equipment_hash, eq_hash);
+            assert_eq!(snap.version, 1);
+            assert!(snap.created_at > 0);
+        });
     }
 
     #[test]
     fn test_get_equipment_returns_latest_version() {
         let env = Env::default();
+        let contract_id = env.register(EquipmentRegistry, ());
 
         let equipment_id: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
         let owner1: Address = owner_a(&env);
         let owner2: Address = owner_b(&env);
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[6u8; 32]);
 
-        let _ = EquipmentRegistry::register_equipment(
-            env.clone(),
-            equipment_id.clone(),
-            owner1.clone(),
-            metadata_hash.clone(),
-        );
-        let _ = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
+        env.as_contract(&contract_id, || {
+            let _ = EquipmentRegistry::register_equipment(
+                env.clone(),
+                equipment_id.clone(),
+                owner1.clone(),
+                metadata_hash.clone(),
+            );
+            let _ = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
 
-        let latest = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
-        assert_eq!(latest.owner, owner2);
-        assert_eq!(latest.version, 2);
+            let latest = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
+            assert_eq!(latest.owner, owner2);
+            assert_eq!(latest.version, 2);
+        });
     }
 
     #[test]
     fn test_update_owner_creates_new_version_snapshot() {
         let env = Env::default();
+        let contract_id = env.register(EquipmentRegistry, ());
 
         let equipment_id: BytesN<32> = BytesN::from_array(&env, &[7u8; 32]);
         let owner1: Address = owner_a(&env);
         let owner2: Address = owner_b(&env);
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[11u8; 32]);
 
-        let h1 = EquipmentRegistry::register_equipment(
-            env.clone(),
-            equipment_id.clone(),
-            owner1.clone(),
-            metadata_hash.clone(),
-        );
-        let h2 = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
-        assert_ne!(h1, h2);
+        env.as_contract(&contract_id, || {
+            let h1 = EquipmentRegistry::register_equipment(
+                env.clone(),
+                equipment_id.clone(),
+                owner1.clone(),
+                metadata_hash.clone(),
+            );
+            let h2 = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
+            assert_ne!(h1, h2);
 
-        let v1 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 1);
-        let v2 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 2);
+            let v1 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 1);
+            let v2 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 2);
 
-        assert_eq!(v1.owner, owner1);
-        assert_eq!(v1.metadata_hash, metadata_hash);
-        assert_eq!(v1.equipment_hash, h1);
-        assert_eq!(v1.version, 1);
+            assert_eq!(v1.owner, owner1);
+            assert_eq!(v1.metadata_hash, metadata_hash);
+            assert_eq!(v1.equipment_hash, h1);
+            assert_eq!(v1.version, 1);
 
-        assert_eq!(v2.owner, owner2);
-        assert_eq!(v2.metadata_hash, metadata_hash);
-        assert_eq!(v2.equipment_hash, h2);
-        assert_eq!(v2.version, 2);
+            assert_eq!(v2.owner, owner2);
+            assert_eq!(v2.metadata_hash, metadata_hash);
+            assert_eq!(v2.equipment_hash, h2);
+            assert_eq!(v2.version, 2);
+        });
     }
 }
 

@@ -11,6 +11,7 @@ import {
 } from '@stellar/stellar-sdk';
 
 const FREIGHTER_LOCAL_KEY = 'maintchain:freighter:address';
+const WALLET_CHANGED_EVENT = 'maintchain:soroban-wallet-changed';
 
 type WalletError = { message: string } | null;
 
@@ -66,6 +67,7 @@ export const useSoroban = () => {
     try {
       if (!next) localStorage.removeItem(FREIGHTER_LOCAL_KEY);
       else localStorage.setItem(FREIGHTER_LOCAL_KEY, next);
+      window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
     } catch {
       // ignore
     }
@@ -254,6 +256,20 @@ export const useSoroban = () => {
     detectFreighter();
     readPersistedAddress();
   }, [detectFreighter, readPersistedAddress]);
+
+  useEffect(() => {
+    const syncWalletState = () => {
+      readPersistedAddress();
+    };
+
+    window.addEventListener(WALLET_CHANGED_EVENT, syncWalletState);
+    window.addEventListener('storage', syncWalletState);
+
+    return () => {
+      window.removeEventListener(WALLET_CHANGED_EVENT, syncWalletState);
+      window.removeEventListener('storage', syncWalletState);
+    };
+  }, [readPersistedAddress]);
 
   useEffect(() => {
     // If we have persisted address, attempt to verify network + refresh balance.
