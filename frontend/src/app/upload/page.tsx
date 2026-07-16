@@ -3,26 +3,36 @@ import { useState } from 'react';
 import FadeInView from '@/components/maintchain/FadeInView';
 import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/maintchain/ui';
 import { useSoroban } from '@/hooks/useSoroban';
+import { api, ApiError } from '@/lib/api';
 
 export default function EvidenceUpload() {
-  const { address, connectWallet, isConnected, callContract } = useSoroban();
+  const { address, connectWallet, isConnected } = useSoroban();
   const [file, setFile] = useState<File | null>(null);
   const [maintenanceId, setMaintenanceId] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleUpload = async () => {
     if (!file || !maintenanceId) return;
     setUploading(true);
+    setUploadResult(null);
+    setUploadError(null);
     try {
-      // 1. Compute hash (this would typically be done in the browser or a helper API)
-      const hash = '0x' + Array.from(new Uint8Array(32)).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+      // 1. Compute hash via the backend's hash utility
+      const hash = await api.computeHash({
+        payload: `${file.name}-${Date.now()}-${file.size}`,
+      });
 
-      // 2. Call Soroban contract: MaintenanceRecords.submit_evidence(maintenance_id, evidence_hash)
-      await callContract('MAINTENANCE_RECORDS_ID', 'submit_evidence', [maintenanceId, hash]);
+      // 2. Submit evidence hash to backend
+      const result = await api.submitEvidence(maintenanceId, {
+        evidence_hash: hash.evidence_hash,
+      });
 
-      alert('Evidence submitted successfully on-chain!');
+      setUploadResult(`Evidence submitted! Status: ${result.status}`);
     } catch (error) {
-      alert('Upload failed: ' + error);
+      const message = error instanceof ApiError ? `${error.code}: ${error.message}` : 'Upload failed';
+      setUploadError(message);
     } finally {
       setUploading(false);
     }
@@ -58,7 +68,7 @@ export default function EvidenceUpload() {
                 value={maintenanceId}
                 onChange={(e) => setMaintenanceId(e.target.value)}
                 className="h-12 w-full rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 text-sm outline-none transition focus:border-[var(--primary)] focus:bg-white"
-                placeholder="Enter record ID"
+                placeholder="Enter record ID (e.g., REC-DE-4471)"
               />
             </div>
             <div>
@@ -71,12 +81,23 @@ export default function EvidenceUpload() {
             </div>
             <button
               onClick={handleUpload}
-              disabled={uploading}
-              className="w-full rounded-full bg-[var(--primary)] py-3 text-white hover:opacity-90 disabled:opacity-50"
+              disabled={uploading || !file || !maintenanceId}
+              className="w-full rounded-full bg-[var(--primary)] py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
             >
-              {uploading ? 'Submitting to blockchain...' : 'Submit Evidence'}
+              {uploading ? 'Submitting to backend...' : 'Submit Evidence'}
             </button>
           </div>
+
+          {uploadResult && (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+              {uploadResult}
+            </div>
+          )}
+          {uploadError && (
+            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              {uploadError}
+            </div>
+          )}
         </FadeInView>
       )}
     </div>

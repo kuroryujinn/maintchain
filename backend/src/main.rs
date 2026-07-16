@@ -17,8 +17,12 @@ use std::net::SocketAddr;
 
 mod audit;
 mod complaint;
+#[allow(dead_code)]
+mod seed;
 use audit::{approve_by_auditor, get_audit_trail};
 use complaint::transition_to_compliant;
+
+use tower_http::cors::{Any, CorsLayer};
 
 use tracing::{error, info};
 
@@ -173,10 +177,64 @@ async fn health_config() -> impl IntoResponse {
 }
 
 
+#[derive(Debug, sqlx::FromRow, Serialize)]
+struct EquipmentRow {
+    id: Uuid,
+    owner_id: Uuid,
+    metadata_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EquipmentListResponse {
+    data: Vec<EquipmentRow>,
+}
+
+async fn list_equipment(
+    State(state): State<AppState>,
+) -> Result<Json<EquipmentListResponse>, (StatusCode, String)> {
+    let rows = sqlx::query_as::<_, EquipmentRow>(
+        r#"SELECT id, owner_id, metadata_hash FROM equipment ORDER BY id"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        error!("list_equipment failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
+    })?;
+
+    Ok(Json(EquipmentListResponse { data: rows }))
+}
+
+async fn list_maintenance(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<MaintenanceResponse>>, (StatusCode, String)> {
+    let rows = sqlx::query(
+        r#"
+        select
+            id as maintenance_id,
+            equipment_id,
+            technician_id,
+            status::text as status,
+            evidence_hash,
+            created_at as created_at
+        from maintenance_records
+        order by created_at desc
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        error!("list_maintenance failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
+    })?;
+
+    Ok(Json(rows.into_iter().map(row_to_maintenance_response).collect()))
+}
+
 async fn register_equipment(
     State(state): State<AppState>,
     Json(req): Json<RegisterEquipmentRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     info!(
         "register_equipment equipment_id={} owner_id={}",
         req.equipment_id, req.owner_id
@@ -198,7 +256,7 @@ async fn register_equipment(
     .await;
 
     match res {
-        Ok(_) => Ok(StatusCode::CREATED),
+        Ok(_) => Ok((StatusCode::CREATED, Json(serde_json::json!({"status": "created"})))),
         Err(e) => {
             error!("register_equipment failed: {e}");
             Err((StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string()))
@@ -492,25 +550,42 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState { db };
 
+    // CORS — allow all origins for local development
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = Router::new()
+        // Health
         .route("/health", get(health))
         .route("/health/config", get(health_config))
 
+        // Hash utility
         .route("/hash/evidence", post(compute_hash))
-        .route("/equipment/register", post(register_equipment))
+
+        // Equipment (RESTful: plural noun, POST to create, GET to list)
+        .route("/equipment", get(list_equipment).post(register_equipment))
+
+        // Maintenance records
+        .route("/maintenance", get(list_maintenance))
         .route("/maintenance/orders", post(create_maintenance_order))
         .route("/maintenance/:id", get(get_maintenance))
-        .route("/maintenance/:id/submit", post(submit_evidence))
+        .route("/maintenance/:id/evidence", post(submit_evidence))
         .route(
-            "/maintenance/:id/approve/supervisor",
+            "/maintenance/:id/approvals/supervisor",
             post(supervisor_approve),
         )
         .route(
-            "/maintenance/:id/reject/supervisor",
+            "/maintenance/:id/approvals/supervisor/reject",
             post(supervisor_reject),
         )
         .route("/maintenance/:id/audit", get(get_audit_trail))
-        .route("/maintenance/:id/approve/auditor", post(approve_by_auditor))
+        .route(
+            "/maintenance/:id/approvals/auditor",
+            post(approve_by_auditor),
+        )
+        .layer(cors)
         .with_state(state);
 
     let addr: SocketAddr = "127.0.0.1:8081".parse()?;
