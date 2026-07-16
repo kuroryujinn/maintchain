@@ -1,167 +1,89 @@
 'use client';
-import { useMemo, useState } from 'react';
+
 import { useSoroban } from '@/hooks/useSoroban';
+import Hero from '@/components/maintchain/landing/Hero';
+import TrustReplaySignature from '@/components/maintchain/landing/TrustReplaySignature';
+import StatGrid from '@/components/maintchain/landing/StatGrid';
+import ComparisonCard from '@/components/maintchain/landing/ComparisonCard';
+import ActivityFeed from '@/components/maintchain/landing/ActivityFeed';
+import WorkerProfileCardPreview from '@/components/maintchain/landing/WorkerProfileCardPreview';
+import MachinePassportPreview from '@/components/maintchain/landing/MachinePassportPreview';
+import LeaderboardPreview from '@/components/maintchain/landing/LeaderboardPreview';
+import IndustriesGrid from '@/components/maintchain/landing/IndustriesGrid';
+import FinalCTA from '@/components/maintchain/landing/FinalCTA';
+import Footer from '@/components/maintchain/landing/Footer';
+import FadeInView from '@/components/maintchain/FadeInView';
+import { EditorialSectionHeader } from '@/components/maintchain/ui';
 
-export default function ComplianceDashboard() {
-  const {
-    address,
-    connectWallet,
-    disconnectWallet,
-    isConnected,
-    walletError,
-
-    networkOk,
-    networkError,
-
-    balanceLoading,
-    balanceXlm,
-    balanceError,
-
-    sendLoading,
-    sendXlm,
-    txHash,
-    sendError,
-  } = useSoroban();
-
-  const [destination, setDestination] = useState('');
-  const [amount, setAmount] = useState('1');
-
-  const truncatedAddress = useMemo(() => {
-    if (!address) return '';
-    return `${address.slice(0, 8)}...${address.slice(-6)}`;
-  }, [address]);
-
-  const canSend = isConnected && networkOk && !!destination && Number(amount) > 0;
+export default function MaintChainHome() {
+  const { walletError, networkError } = useSoroban();
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <h1 className="text-3xl font-bold">Compliance Dashboard</h1>
+    <div className="space-y-12 py-6">
+      {/* 1 — Hero */}
+      <Hero />
 
-        {!isConnected ? (
-          <button
-            onClick={connectWallet}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-          >
-            Connect Wallet
-          </button>
-        ) : (
-          <div className="flex items-center gap-3">
-            <div className="text-sm text-slate-600">
-              Connected: <span className="font-mono">{truncatedAddress}</span>
-            </div>
-            <button
-              onClick={disconnectWallet}
-              className="text-sm text-slate-600 hover:text-slate-900 underline"
-            >
-              Disconnect
-            </button>
-          </div>
-        )}
-      </header>
-
+      {/* Wallet attention (operational errors only; no landing operational widgets) */}
       {(walletError || networkError) && (
-        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md">
-          <div className="font-semibold">Wallet error</div>
-          <div className="text-sm mt-1">{walletError?.message ?? networkError?.message}</div>
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="glass p-4 text-sm text-red-800" style={{ background: 'rgba(254, 242, 242, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(254, 202, 202, 0.6)' }}>
+            <div className="font-semibold">Wallet attention required</div>
+            <div className="mt-1">{walletError?.message ?? networkError?.message}</div>
+          </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-6 bg-white rounded-xl shadow-sm border border-slate-200">
-          <h3 className="font-semibold text-slate-500 mb-2">XLM Balance (Testnet)</h3>
-          {balanceLoading ? (
-            <p className="text-sm text-slate-600">Loading...</p>
-          ) : balanceError ? (
-            <p className="text-sm text-red-700">{balanceError}</p>
-          ) : (
-            <p className="text-2xl font-bold">
-              {balanceXlm ?? '0'} <span className="text-base font-normal">XLM</span>
-            </p>
-          )}
-          <div className="text-xs text-slate-500 mt-2">
-            Fetched directly from Horizon (Stellar Testnet)
-          </div>
+      {/* 2 — Trust Replay (signature) */}
+      <TrustReplaySignature />
+
+      {/* 3 — Network Statistics */}
+      <FadeInView direction="up" distance="sm" duration={450} className="mx-auto max-w-7xl px-4">
+        <div className="glass p-6 sm:p-10">
+          <EditorialSectionHeader
+            number="01"
+            title="Global trust, measured in proof"
+            caption="Network statistics · Four trust signals that stay verifiable as the network evolves."
+          />
+          <StatGrid />
         </div>
+      </FadeInView>
 
-        <div className="p-6 bg-white rounded-xl shadow-sm border border-slate-200">
-          <h3 className="font-semibold text-slate-500 mb-2">Total Assets</h3>
-          <p className="text-2xl font-bold">124</p>
+      {/* 4 — Why MaintChain? */}
+      <FadeInView direction="up" distance="sm" duration={450} className="mx-auto max-w-7xl px-4">
+        <div className="space-y-4">
+          <div className="section-number">02</div>
+          <h2 className="mt-2 text-display-sm font-heading text-[var(--text-primary)]">
+            Trust that travels with every repair
+          </h2>
+          <p className="mt-3 max-w-3xl font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+            Why MaintChain? · A quick scan comparison—built for auditors and hiring teams.
+          </p>
         </div>
-
-        <div className="p-6 bg-white rounded-xl shadow-sm border border-slate-200">
-          <h3 className="font-semibold text-slate-500 mb-2">Certified Valid</h3>
-          <p className="text-2xl font-bold text-green-600">98%</p>
+        <div className="mt-6">
+          <ComparisonCard />
         </div>
-      </div>
+      </FadeInView>
 
-      <section className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-bold mb-4">Send XLM (Testnet)</h2>
+      {/* 5 — Live Network */}
+      <ActivityFeed />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700">
-              Destination address
-            </label>
-            <input
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              placeholder="G... (public address)"
-              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-            />
-          </div>
+      {/* 6 — Featured Workers */}
+      <WorkerProfileCardPreview />
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700">Amount (XLM)</label>
-            <input
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              type="number"
-              min="0"
-              step="0.0000001"
-              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
+      {/* 7 — Machine Passport */}
+      <MachinePassportPreview />
 
-        {sendError && (
-          <div className="mt-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md text-sm">
-            {sendError}
-          </div>
-        )}
+      {/* 8 — Leaderboard Preview */}
+      <LeaderboardPreview />
 
-        {txHash && (
-          <div className="mt-4 bg-green-50 border border-green-200 text-green-900 px-4 py-3 rounded-md text-sm">
-            <div className="font-semibold">Transaction submitted</div>
-            <div className="mt-1 font-mono">
-              {txHash}
-            </div>
-            <div className="mt-2 text-xs text-green-800">
-              View on Stellar Expert: (network assumed Testnet)
-            </div>
-          </div>
-        )}
+      {/* 9 — Industries */}
+      <IndustriesGrid />
 
-        <div className="mt-4 flex items-center gap-3">
-          <button
-            disabled={!canSend || sendLoading}
-            onClick={async () => {
-              const amt = amount.trim();
-              const dest = destination.trim();
-              await sendXlm(dest, amt);
-            }}
-            className="bg-blue-600 disabled:bg-blue-300 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:cursor-not-allowed"
-          >
-            {sendLoading ? 'Sending...' : 'Send XLM'}
-          </button>
+      {/* 10 — Final CTA */}
+      <FinalCTA />
 
-          {!networkOk && (
-            <div className="text-sm text-slate-600">
-              Network mismatch: connect Freighter to Stellar Testnet.
-            </div>
-          )}
-        </div>
-      </section>
+      <Footer />
     </div>
   );
 }
+

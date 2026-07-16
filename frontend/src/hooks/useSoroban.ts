@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  getNetwork,
+  isConnected as freighterIsConnected,
+  requestAccess,
+  signTransaction as freighterSignTransaction,
+} from '@stellar/freighter-api';
+import {
   TransactionBuilder,
   Operation,
   Networks,
@@ -45,8 +51,9 @@ export const useSoroban = () => {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
-  const detectFreighter = useCallback(() => {
-    const installed = typeof window !== 'undefined' && !!(window as any).Freighter;
+  const detectFreighter = useCallback(async () => {
+    const result = await freighterIsConnected();
+    const installed = !!result.isConnected;
     setFreighterInstalled(installed);
     return installed;
   }, []);
@@ -74,30 +81,16 @@ export const useSoroban = () => {
   }, []);
 
   const getWalletNetworkInfo = useCallback(async () => {
-    // Freighter network information API is not guaranteed across versions.
-    // We'll probe a few shapes and fall back to "unknown" => treated as mismatch.
-    const f: any = (window as any).Freighter;
-
     try {
-      if (!f) return { kind: 'missing' as const, raw: null };
-
-      // Newer freighter versions: identity.getPublicKey + "network" property.
-      if (typeof f.getNetwork === 'function') {
-        const net = await f.getNetwork();
-        return { kind: 'value' as const, raw: net };
+      const net = await getNetwork();
+      if (net.error) {
+        return { kind: 'error' as const, raw: net.error.message };
       }
 
-      // Some versions may store it.
-      if (f.network) return { kind: 'value' as const, raw: f.network };
-
-      // Identity method can sometimes include network.
-      if (f.identity && typeof f.identity.getAddress === 'function') {
-        const addr = await f.identity.getAddress();
-        // no network info; return address (still useful, but mismatch check can't be done)
-        return { kind: 'address_only' as const, raw: addr };
-      }
-
-      return { kind: 'unknown' as const, raw: null };
+      return {
+        kind: 'value' as const,
+        raw: net.networkPassphrase ?? net.network,
+      };
     } catch (e: any) {
       return { kind: 'error' as const, raw: e?.message ?? String(e) };
     }
@@ -109,7 +102,7 @@ export const useSoroban = () => {
     try {
       setNetworkError(null);
 
-      const installed = detectFreighter();
+      const installed = await detectFreighter();
       if (!installed) {
         setNetworkOk(false);
         setNetworkError({ message: 'Freighter not found.' });
@@ -127,6 +120,11 @@ export const useSoroban = () => {
         rawStr.includes('public') || rawStr.includes('mainnet') || rawStr.includes('passphrase_main');
 
       if (info.kind === 'value') {
+        if (String(raw) === NETWORK_PASSPHRASE) {
+          setNetworkOk(true);
+          return true;
+        }
+
         if (looksLikeTestnet) {
           setNetworkOk(true);
           return true;
@@ -139,16 +137,6 @@ export const useSoroban = () => {
           return false;
         }
         // Unknown value => block sends but show guidance
-        setNetworkOk(false);
-        setNetworkError({
-          message:
-            'Unable to verify Freighter network. Continue only if you are on Stellar Testnet.',
-        });
-        return false;
-      }
-
-      if (info.kind === 'address_only') {
-        // Can't verify => block sends but keep UI usable.
         setNetworkOk(false);
         setNetworkError({
           message:
@@ -173,14 +161,15 @@ export const useSoroban = () => {
     }
   }, [detectFreighter, getWalletNetworkInfo]);
 
-  const refreshBalance = useCallback(async () => {
-    if (!address) return;
+  const refreshBalance = useCallback(async (overrideAddress?: string) => {
+    const accountAddress = overrideAddress ?? address;
+    if (!accountAddress) return;
 
     setBalanceLoading(true);
     setBalanceError(null);
 
     try {
-      const res = await fetch(`${horizon.url}/accounts/${encodeURIComponent(address)}`);
+      const res = await fetch(`${horizon.url}/accounts/${encodeURIComponent(accountAddress)}`);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         const title = body?.title ?? res.statusText;
@@ -209,16 +198,19 @@ export const useSoroban = () => {
     setNetworkError(null);
     setNetworkOk(true);
 
-    const installed = detectFreighter();
+    const installed = await detectFreighter();
     if (!installed) {
       setWalletError({ message: 'Please install Freighter wallet.' });
       return;
     }
 
     try {
-      const f: any = (window as any).Freighter;
+      const accessResult = await requestAccess();
+      if (accessResult.error) {
+        throw new Error(accessResult.error.message);
+      }
 
-      const authAddress = await f.identity.getAddress();
+      const authAddress = accessResult.address;
       setAddress(authAddress);
       setIsConnected(true);
       persistAddress(authAddress);
@@ -227,7 +219,7 @@ export const useSoroban = () => {
       await validateNetwork();
 
       // Balance load
-      await refreshBalance();
+      await refreshBalance(authAddress);
     } catch (e: any) {
       setWalletError({
         message: e?.message ? String(e.message) : 'Freighter connection failed.',
@@ -253,7 +245,7 @@ export const useSoroban = () => {
   }, [persistAddress]);
 
   useEffect(() => {
-    detectFreighter();
+    void detectFreighter();
     readPersistedAddress();
   }, [detectFreighter, readPersistedAddress]);
 
@@ -349,63 +341,36 @@ export const useSoroban = () => {
         // Serialize to XDR
         const txXDR = tx.toXDR();
 
-        // Preference: use "submitTransaction" if it exists on this Freighter version
-        // Otherwise: signTransaction(txXDR, networkPassphrase) + submitTransaction(txSigned)
-        const freighterAny: any = (window as any).Freighter;
+        const signed = await freighterSignTransaction(txXDR, {
+          networkPassphrase: NETWORK_PASSPHRASE,
+          address,
+        });
 
-        let signedXDR: string | null = null;
-
-        if (typeof freighterAny.submitTransaction === 'function') {
-          // Some versions accept txXDR and network passphrase, others accept tx.
-          // We'll try signature patterns with runtime checks.
-          const submitResult = await freighterAny.submitTransaction(
-            txXDR,
-            NETWORK_PASSPHRASE
-          ).catch(async (e: any) => {
-            // fallback: maybe submit expects transaction object
-            return freighterAny.submitTransaction(txXDR).catch(() => {
-              throw e;
-            });
-          });
-
-          // submitResult may contain tx hash or return a Stellar tx response.
-          const hash =
-            submitResult?.hash ??
-            submitResult?.transactionHash ??
-            submitResult?.result?.hash ??
-            tx.hash().toString();
-
-          setTxHash(hash);
-          return hash;
+        if (signed.error) {
+          throw new Error(signed.error.message);
         }
 
-        if (typeof freighterAny.signTransaction === 'function') {
-          signedXDR = await freighterAny.signTransaction(txXDR, NETWORK_PASSPHRASE);
+        const signedXDR = signed.signedTxXdr;
 
-          if (!signedXDR) throw new Error('Signing failed.');
+        if (!signedXDR) throw new Error('Signing failed.');
 
-          // Submit signed tx to Horizon
-          const res = await fetch(`${horizon.url}/transactions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tx_blob: signedXDR }),
-          });
+        // Submit signed tx to Horizon
+        const res = await fetch(`${horizon.url}/transactions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tx_blob: signedXDR }),
+        });
 
-          if (!res.ok) {
-            const body = await res.json().catch(() => null);
-            const title = body?.title ?? res.statusText;
-            throw new Error(title);
-          }
-
-          const body = await res.json();
-          const hash = body?.hash ?? tx.hash().toString();
-          setTxHash(hash);
-          return hash;
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          const title = body?.title ?? res.statusText;
+          throw new Error(title);
         }
 
-        throw new Error(
-          'Unsupported Freighter wallet API. submitTransaction/signTransaction not available.'
-        );
+        const body = await res.json();
+        const hash = body?.hash ?? tx.hash().toString();
+        setTxHash(hash);
+        return hash;
       } catch (e: any) {
         setSendError(String(e?.message ?? e));
         throw e;
@@ -418,21 +383,8 @@ export const useSoroban = () => {
 
   // Best-effort disconnect handler if Freighter exposes events.
   useEffect(() => {
-    const f: any = (window as any).Freighter;
-    if (!f) return;
-
-    // Some versions: f.on('disconnect', cb) or f.on('accountChanged', cb)
-    const anyF: any = f;
-
-    try {
-      if (typeof anyF.on === 'function') {
-        const handleDisconnect = () => disconnectWallet();
-        anyF.on('disconnect', handleDisconnect);
-        // accountChanged can also act as "network/account changed"
-      }
-    } catch {
-      // ignore
-    }
+    // The package API does not expose a stable event subscription surface here.
+    // Persisted address + explicit reconnect cover refreshes safely.
   }, [disconnectWallet]);
 
   const callContract = useCallback(async (contractId: string, functionName: string, args: any[]) => {

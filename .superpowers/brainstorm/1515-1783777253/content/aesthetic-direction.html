@@ -1,0 +1,84 @@
+<h2>Which "futuristic" feels right for MaintChain?</h2>
+<p class="subtitle">The current design prompt bans glow, animated backgrounds, gradients, and floating objects — but says animations under 300ms are fine. Each option below resolves that tension differently. Pick the one that feels closest, or "other" if none of them.</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="restrained-future" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(180deg, #f7f8fa 0%, #eef3f8 100%); padding: 20px; min-height: 220px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="width: 28px; height: 28px; border-radius: 8px; background: #1f2937; color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px;">MC</div>
+        <div style="font-weight: 600; color: #0f172a; font-size: 13px;">MaintChain</div>
+        <div style="margin-left: auto; background: rgba(37,99,235,0.1); color: #2563eb; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 600;">Connect Wallet</div>
+      </div>
+      <div style="background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px;">
+        <div style="font-size: 11px; color: #6b7280; letter-spacing: 0.15em; text-transform: uppercase;">The world's verifiable reputation</div>
+        <div style="font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 8px; letter-spacing: -0.02em;">Every repair builds trust.</div>
+        <div style="font-size: 13px; color: #6b7280; margin-top: 6px;">Stays inside the spec — light backgrounds, blue accents, but adds sharper type, monospace data IDs, hairline borders, a thin progress bar that animates 0→100% on first paint, and a 1px grid overlay on hero only.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Restrained future (spec-faithful)</h3>
+      <p>Honors every rule in <code>docs/frontend.md</code>. "Futuristic" comes from sharper type, monospace data, hairline 1px borders, subtle motion on the trust replay, and a more confident grid — not from new colors or effects.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="editorial-technical" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #f4f5f7; padding: 20px; min-height: 220px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid #d4d4d8; padding-bottom: 8px;">
+        <div style="font-size: 10px; color: #71717a; letter-spacing: 0.2em; text-transform: uppercase;">Edition 47 · July 2026</div>
+        <div style="margin-left: auto; font-family: monospace; font-size: 10px; color: #71717a;">Soroban ledger</div>
+      </div>
+      <div style="font-family: serif; font-size: 28px; font-weight: 600; color: #18181b; line-height: 1.1; letter-spacing: -0.02em;">Trust, audited.</div>
+      <div style="font-size: 12px; color: #52525b; line-height: 1.5;">Editorial-tech feel. Larger numbered sections (01, 02, 03), a single bold display weight, JetBrains Mono for all data. Still light, still calm, but feels like a Bloomberg Terminal for repairs — more authoritative, more futuristic by editorial confidence.</div>
+    </div>
+    <div class="card-body">
+      <h3>B. Editorial technical</h3>
+      <p>Newspaper / Bloomberg feel. Big numbered sections, a single bold display weight, a tighter grid, and mono everywhere data appears. Light backgrounds stay. No glow, no glass — but it reads as "we know what we're doing" rather than "calm SaaS."</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="soft-elevated" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(135deg, #f0f4ff 0%, #f7f8fa 60%); padding: 20px; min-height: 220px; display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden;">
+      <div style="position: absolute; top: -40px; right: -40px; width: 180px; height: 180px; border-radius: 50%; background: radial-gradient(circle, rgba(37,99,235,0.18), transparent 70%);"></div>
+      <div style="background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.6); border-radius: 18px; padding: 18px; box-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 8px 24px rgba(15,23,42,0.05); position: relative;">
+        <div style="font-size: 11px; color: #2563eb; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 600;">Live trust network</div>
+        <div style="font-size: 18px; font-weight: 600; color: #0f172a; margin-top: 6px;">Hydraulic pump verified</div>
+        <div style="display: flex; gap: 6px; margin-top: 10px;">
+          <div style="height: 6px; flex: 1; background: #16a34a; border-radius: 999px;"></div>
+          <div style="height: 6px; flex: 1; background: #16a34a; border-radius: 999px;"></div>
+          <div style="height: 6px; flex: 1; background: #16a34a; border-radius: 999px;"></div>
+          <div style="height: 6px; flex: 1; background: #e5e7eb; border-radius: 999px;"></div>
+          <div style="height: 6px; flex: 1; background: #e5e7eb; border-radius: 999px;"></div>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #475569; line-height: 1.5;">Soft glassmorphism. Layered cards with hairline borders, a single soft blue glow behind the hero, large rounded radii (24–32px), no harsh shadows. Stays light. Reads more like Linear/Arc/Vercel than a maintenance tool — but might violate the spec's "no excessive gradients" rule.</div>
+    </div>
+    <div class="card-body">
+      <h3>C. Soft elevated (glass + light glow)</h3>
+      <p>Layered glass cards, large rounded radii, a single soft radial glow behind the hero, hairline 1px white borders on frosted surfaces. Light backgrounds preserved. Closer to Linear/Arc/Vercel than to a maintenance tool. Pushing the spec on "no glow / no gradients."</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="command-center" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0f1a; padding: 20px; min-height: 220px; display: flex; flex-direction: column; gap: 10px; font-family: monospace;">
+      <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+        <div style="width: 8px; height: 8px; background: #16a34a; border-radius: 50%; box-shadow: 0 0 8px #16a34a;"></div>
+        <div style="font-size: 11px; color: #94a3b8; letter-spacing: 0.15em;">SOROBAN · LIVE</div>
+        <div style="margin-left: auto; font-size: 11px; color: #64748b;">12:48:03 UTC</div>
+      </div>
+      <div style="color: #e2e8f0; font-size: 14px;">▸ Hydraulic pump verified · Singapore</div>
+      <div style="color: #64748b; font-size: 12px; padding-left: 16px;">trust 4.92 · evidence ok · cert pending</div>
+      <div style="color: #e2e8f0; font-size: 14px;">▸ Boiler inspection · Mumbai</div>
+      <div style="color: #64748b; font-size: 12px; padding-left: 16px;">trust 4.71 · 3 of 3 approvals</div>
+      <div style="color: #e2e8f0; font-size: 14px;">▸ Motor replacement · Berlin</div>
+      <div style="font-size: 11px; color: #475569; line-height: 1.5; margin-top: 8px;">Dark navy background, monospace everything, terminal-style log output for the live network. Most "futuristic" of the four. Breaks the spec's light-background rule the most — would need to update docs/frontend.md too.</div>
+    </div>
+    <div class="card-body">
+      <h3>D. Command center (dark)</h3>
+      <p>Dark navy background, monospace-everywhere, terminal-style log for live network. Reads like a mission control. Most overtly "futuristic" but breaks the spec's light-background rule — would require updating <code>docs/frontend.md</code> and risks losing the "calm, trustworthy" feel the prompt asks for.</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top: 24px;">Tell me in the terminal which one feels right, or describe a mix (e.g. "B's typography with C's card style"). The next step is scope — which pages get the new treatment and which stay as-is.</p>
