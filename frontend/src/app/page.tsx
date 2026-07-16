@@ -33,14 +33,14 @@ export default function MaintChainHome() {
         </div>
       )}
 
-      {/* 2 — Trust Replay (signature) */}
+      {/* 2 — Trust Replay (signature) — section 01 */}
       <TrustReplaySignature />
 
-      {/* 3 — Network Statistics */}
+      {/* 3 — Network Statistics — section 02 */}
       <FadeInView direction="up" distance="sm" duration={450} className="mx-auto max-w-7xl px-4">
         <div className="glass p-6 sm:p-10">
           <EditorialSectionHeader
-            number="01"
+            number="02"
             title="Global trust, measured in proof"
             caption="Network statistics · Four trust signals that stay verifiable as the network evolves."
           />
@@ -48,10 +48,10 @@ export default function MaintChainHome() {
         </div>
       </FadeInView>
 
-      {/* 4 — Why MaintChain? */}
+      {/* 4 — Why MaintChain? — section 03 */}
       <FadeInView direction="up" distance="sm" duration={450} className="mx-auto max-w-7xl px-4">
         <div className="space-y-4">
-          <div className="section-number">02</div>
+          <div className="section-number">03</div>
           <h2 className="mt-2 text-display-sm font-heading text-[var(--text-primary)]">
             Trust that travels with every repair
           </h2>
@@ -64,20 +64,20 @@ export default function MaintChainHome() {
         </div>
       </FadeInView>
 
-      {/* 5 — Live Network */}
+      {/* 5 — Live Network — section 04 */}
       <ActivityFeed />
 
-      {/* 6 — Featured Workers */}
+      {/* 6 — Featured Workers — section 05 */}
       <WorkerProfileCardPreview />
 
-      {/* 7 — Machine Passport */}
+      {/* 7 — Machine Passport — section 06 */}
       <MachinePassportPreview />
 
-      {/* 8 — Leaderboard Preview */}
-      <LeaderboardPreview />
-
-      {/* 9 — Industries */}
+      {/* 8 — Industries — section 07 */}
       <IndustriesGrid />
+
+      {/* 9 — Leaderboard Preview — section 08 */}
+      <LeaderboardPreview />
 
       {/* 10 — Final CTA */}
       <FinalCTA />
@@ -86,4 +86,3 @@ export default function MaintChainHome() {
     </div>
   );
 }
-

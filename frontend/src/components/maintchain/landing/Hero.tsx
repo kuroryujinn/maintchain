@@ -8,7 +8,7 @@ import FadeInView from '@/components/maintchain/FadeInView';
 export default function Hero() {
   return (
     <section aria-label="Hero" className="relative mx-auto max-w-7xl px-4">
-      {/* Industrial grid backdrop (no color scheme change) */}
+      {/* Industrial grid backdrop */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 -z-10"
@@ -19,9 +19,29 @@ export default function Hero() {
         }}
       />
 
+      {/* Soft glow accents behind hero */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-40 -left-20 -z-10 h-96 w-96 opacity-40"
+        style={{
+          background: 'radial-gradient(circle, rgba(37,99,235,0.12), transparent 70%)',
+          filter: 'blur(60px)',
+        }}
+      />
+
       <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
-        {/* Left: copy only (no paragraphs) */}
+        {/* Left: copy only */}
         <div className="space-y-6">
+          {/* Editorial masthead-style monoline */}
+          <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(22,163,74,0.5)]" />
+            <span>Edition 47</span>
+            <span aria-hidden="true">·</span>
+            <span>11 July 2026</span>
+            <span aria-hidden="true">·</span>
+            <span>soroban ledger</span>
+          </div>
+
           <div className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em]" style={{
             border: '1px solid rgba(37, 99, 235, 0.2)',
             background: 'rgba(255, 255, 255, 0.6)',
@@ -48,7 +68,7 @@ export default function Hero() {
           <div className="flex flex-wrap gap-3 pt-2">
             <Link
               href="/workers"
-              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(37,99,235,0.35)] transition-all duration-200 hover:shadow-[0_12px_32px_rgba(37,99,235,0.45)]"
+              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(37,99,235,0.35)] transition-all duration-200 hover:shadow-[0_12px_32px_rgba(37,99,235,0.45)] hover:-translate-y-0.5"
             >
               Find Trusted Experts <ArrowRight className="h-4 w-4" />
             </Link>
@@ -90,15 +110,16 @@ export default function Hero() {
                 Evidence-first connections
               </div>
             </div>
-            <div className="rounded-full bg-[var(--nav)] px-3 py-1 text-xs font-semibold text-white">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--nav)] px-3 py-1 text-xs font-semibold text-white">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(22,163,74,0.6)]" />
               Live
             </div>
           </div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            <div className="glass p-4">
+            <div className="glass p-4 hover:-translate-y-0.5">
               <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[var(--nav)] text-white">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[var(--nav)] text-white text-xs font-bold">
                   W
                 </div>
                 <div className="text-sm font-semibold text-[var(--text-primary)]">
@@ -109,9 +130,9 @@ export default function Hero() {
                 Reputation follows verified outcomes
               </div>
             </div>
-            <div className="glass p-4">
+            <div className="glass p-4 hover:-translate-y-0.5">
               <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[var(--primary)] text-white">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 text-white text-xs font-bold shadow-[0_4px_10px_rgba(37,99,235,0.3)]">
                   M
                 </div>
                 <div className="text-sm font-semibold text-[var(--text-primary)]">
@@ -146,9 +167,9 @@ export default function Hero() {
               />
             </div>
 
-            {/* Nodes */}
-            <div className="absolute left-6 top-10">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+            {/* Nodes with hover effects */}
+            <div className="absolute left-6 top-10 transition-all duration-200 hover:-translate-y-1">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-sm">
                 <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                   Worker
                 </div>
@@ -156,8 +177,8 @@ export default function Hero() {
               </div>
             </div>
 
-            <div className="absolute right-10 top-6">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+            <div className="absolute right-10 top-6 transition-all duration-200 hover:-translate-y-1">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-sm">
                 <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                   Certificate
                 </div>
@@ -165,8 +186,8 @@ export default function Hero() {
               </div>
             </div>
 
-            <div className="absolute left-10 bottom-8">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+            <div className="absolute left-10 bottom-8 transition-all duration-200 hover:-translate-y-1">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-sm">
                 <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                   Machine
                 </div>
@@ -174,8 +195,8 @@ export default function Hero() {
               </div>
             </div>
 
-            <div className="absolute right-6 bottom-14">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+            <div className="absolute right-6 bottom-14 transition-all duration-200 hover:-translate-y-1">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-sm">
                 <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                   Reputation
                 </div>
@@ -191,7 +212,7 @@ export default function Hero() {
               aria-hidden="true"
             >
               <defs>
-                <linearGradient id="mc-conn" x1="0" y1="0" x2="1" y2="1">
+                <linearGradient id="mc-conn-hero" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0" stopColor="rgba(37,99,235,0.55)" />
                   <stop offset="1" stopColor="rgba(22,163,74,0.35)" />
                 </linearGradient>
@@ -200,7 +221,7 @@ export default function Hero() {
               <path
                 d="M60 70 C140 40, 190 40, 260 55"
                 fill="none"
-                stroke="url(#mc-conn)"
+                stroke="url(#mc-conn-hero)"
                 strokeWidth="2"
                 strokeDasharray="6 6"
                 opacity="0.9"
@@ -230,7 +251,7 @@ export default function Hero() {
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="glass p-3">
+            <div className="glass p-3 hover:-translate-y-0.5">
               <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                 Workers
               </div>
@@ -238,7 +259,7 @@ export default function Hero() {
                 Trusted
               </div>
             </div>
-            <div className="glass p-3">
+            <div className="glass p-3 hover:-translate-y-0.5">
               <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                 Evidence
               </div>
@@ -246,7 +267,7 @@ export default function Hero() {
                 Attached
               </div>
             </div>
-            <div className="glass p-3">
+            <div className="glass p-3 hover:-translate-y-0.5">
               <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                 Certificates
               </div>

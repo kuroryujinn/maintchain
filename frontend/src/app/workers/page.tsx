@@ -45,12 +45,12 @@ export default function WorkersPage() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search by worker, specialization, or location"
-            className="h-12 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+            className="h-12 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 text-sm outline-none transition focus:border-[var(--primary)] focus:bg-white focus:ring-2 focus:ring-[var(--primary-glow)]"
           />
           <select
             value={sortBy}
             onChange={(event) => setSortBy(event.target.value)}
-            className="h-12 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+            className="h-12 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 text-sm outline-none transition focus:border-[var(--primary)] focus:bg-white focus:ring-2 focus:ring-[var(--primary-glow)]"
           >
             {workerSortOptions.map((option) => (
               <option key={option} value={option}>

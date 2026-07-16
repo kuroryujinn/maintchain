@@ -5,7 +5,7 @@ import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/m
 import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
 import type { AuditResponse } from '@/lib/api-types';
-import { CheckCircle2, Clock3 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3 } from 'lucide-react';
 
 export default function AuditTimeline() {
   const { connectWallet, isConnected } = useSoroban();
@@ -74,13 +74,14 @@ export default function AuditTimeline() {
 
                 {(error || txHash) && (
                   <div
-                    className="mt-4 glass px-4 py-3 text-sm"
+                    className="mt-4 glass px-4 py-3 text-sm motion-safe:animate-[fadeSlideUp_0.3s_ease-out]"
                     style={{
                       borderColor: txHash ? 'rgba(22, 163, 74, 0.35)' : 'rgba(220, 38, 38, 0.35)',
                       color: txHash ? '#166534' : '#991b1b'
                     }}
                   >
-                    <div className="font-semibold">
+                    <div className="flex items-center gap-2 font-semibold">
+                      {txHash ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
                       {txHash ? 'Certification processed' : 'Certification failed'}
                     </div>
                     <div className="mt-1 font-mono text-xs">{txHash ?? error}</div>
@@ -146,18 +147,29 @@ export default function AuditTimeline() {
                         <div className="glass p-4 border-dashed border-[var(--border)]">
                           <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">Auditor Certification</div>
                           <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">Pending your certification</div>
+                          <div className="mt-2">
+                            <button
+                              onClick={() => handleCertify('REC-DE-4471')}
+                              className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition"
+                            >
+                              Issue Compliance Certificate
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </>
                   )}
                 </div>
 
-                <button
-                  onClick={() => handleCertify('REC-DE-4471')}
-                  className="mt-6 rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition"
-                >
-                  Issue Compliance Certificate
-                </button>
+                {/* Only show bottom certify button if we have dynamic data (API loaded) */}
+                {auditData && auditData.events.length > 0 && (
+                  <button
+                    onClick={() => handleCertify('REC-DE-4471')}
+                    className="mt-6 rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition"
+                  >
+                    Issue Compliance Certificate
+                  </button>
+                )}
               </div>
             </div>
           </FadeInView>

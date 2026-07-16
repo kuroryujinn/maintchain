@@ -3,6 +3,9 @@ import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/m
 import { dashboardSnapshot } from '@/data/maintchain';
 
 export default function DashboardPage() {
+  const trustValue = parseFloat(dashboardSnapshot.trustScoreToday);
+  const trustPercent = Math.min(trustValue, 100);
+
   return (
     <div className="space-y-8 py-6">
       <EditorialSectionHeader
@@ -14,10 +17,34 @@ export default function DashboardPage() {
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <FadeInView direction="up" distance="sm" duration={400} delay={0 * 60}>
-          <DetailPanel glass label="Today's trust score">{dashboardSnapshot.trustScoreToday}</DetailPanel>
+          <div className="glass p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">Today&apos;s trust score</div>
+                <div className="mt-3 text-3xl font-semibold text-[var(--text-primary)]">{dashboardSnapshot.trustScoreToday}</div>
+              </div>
+              <div className="relative h-16 w-16">
+                <svg className="h-full w-full -rotate-90" viewBox="0 0 36 36">
+                  <circle cx="18" cy="18" r="16" fill="none" stroke="var(--border)" strokeWidth="2.5" />
+                  <circle
+                    cx="18" cy="18" r="16" fill="none" stroke="var(--primary)" strokeWidth="2.5"
+                    strokeDasharray={`${trustPercent} ${100 - trustPercent}`}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-[var(--primary)]">{dashboardSnapshot.trustScoreToday}</span>
+              </div>
+            </div>
+          </div>
         </FadeInView>
         <FadeInView direction="up" distance="sm" duration={400} delay={1 * 60}>
-          <DetailPanel glass label="Weekly rank">{dashboardSnapshot.weeklyRank}</DetailPanel>
+          <div className="glass p-6">
+            <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-secondary)]">Weekly rank</div>
+            <div className="mt-3 text-3xl font-semibold text-[var(--text-primary)]">{dashboardSnapshot.weeklyRank}</div>
+            <div className="mt-3 h-2 w-full rounded-full bg-[var(--border)] overflow-hidden">
+              <div className="h-2 rounded-full bg-emerald-500 transition-all duration-500" style={{ width: '80%' }} />
+            </div>
+          </div>
         </FadeInView>
         <FadeInView direction="up" distance="sm" duration={400} delay={2 * 60}>
           <DetailPanel glass label="Monthly repairs">{dashboardSnapshot.monthlyRepairs}</DetailPanel>
@@ -56,6 +83,24 @@ export default function DashboardPage() {
           </div>
         </FadeInView>
       </section>
+
+      {/* Mini activity chart */}
+      <FadeInView className="glass p-6" direction="up" distance="sm" duration={400} delay={200}>
+        <EditorialSectionHeader number="04" title="Monthly activity" />
+        <div className="mt-6 flex items-end gap-2 h-32">
+          {[40, 65, 45, 80, 55, 90, 70, 85, 60, 75, 95, 88].map((height, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <div
+                className="w-full rounded-full bg-gradient-to-t from-[var(--primary)] to-blue-400 transition-all duration-300 hover:opacity-80 cursor-pointer"
+                style={{ height: `${height}%` }}
+              />
+              <span className="text-[10px] text-[var(--text-tertiary)]">
+                {['J','F','M','A','M','J','J','A','S','O','N','D'][i]}
+              </span>
+            </div>
+          ))}
+        </div>
+      </FadeInView>
     </div>
   );
 }
