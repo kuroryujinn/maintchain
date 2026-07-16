@@ -14,7 +14,11 @@ import {
   Asset,
   BASE_FEE,
   Memo,
+  Horizon,
 } from '@stellar/stellar-sdk';
+
+
+import { invokeContract, simulateContract, toScVal, bytes32ScVal } from '@/lib/soroban';
 
 const FREIGHTER_LOCAL_KEY = 'maintchain:freighter:address';
 const WALLET_CHANGED_EVENT = 'maintchain:soroban-wallet-changed';
@@ -22,9 +26,6 @@ const WALLET_CHANGED_EVENT = 'maintchain:soroban-wallet-changed';
 type WalletError = { message: string } | null;
 
 const HORIZON_TESTNET_URL = 'https://horizon-testnet.stellar.org';
-
-// Freighter identity gives you a public address for whatever it is connected to.
-// For this project we want to operate on Stellar Testnet.
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 
 export const useSoroban = () => {
@@ -97,8 +98,6 @@ export const useSoroban = () => {
   }, []);
 
   const validateNetwork = useCallback(async () => {
-    // Deterministic best-effort mismatch detection.
-    // We only set networkOk=true if we have reasonably strong evidence of TESTNET.
     try {
       setNetworkError(null);
 
@@ -113,43 +112,35 @@ export const useSoroban = () => {
       const raw = (info as any).raw;
       const rawStr = raw ? String(raw).toLowerCase() : '';
 
-      const looksLikeTestnet =
-        rawStr.includes('testnet') || rawStr.includes('passphrase_testnet') || rawStr === 'test';
-
-      const looksLikeMainnet =
-        rawStr.includes('public') || rawStr.includes('mainnet') || rawStr.includes('passphrase_main');
-
       if (info.kind === 'value') {
         if (String(raw) === NETWORK_PASSPHRASE) {
           setNetworkOk(true);
           return true;
         }
 
-        if (looksLikeTestnet) {
+        if (rawStr.includes('testnet') || rawStr.includes('passphrase_testnet') || rawStr === 'test') {
           setNetworkOk(true);
           return true;
         }
-        if (looksLikeMainnet) {
+
+        if (rawStr.includes('public') || rawStr.includes('mainnet') || rawStr.includes('passphrase_main')) {
           setNetworkOk(false);
           setNetworkError({
             message: 'Network mismatch: connect a Freighter session for Stellar Testnet.',
           });
           return false;
         }
-        // Unknown value => block sends but show guidance
+
         setNetworkOk(false);
         setNetworkError({
-          message:
-            'Unable to verify Freighter network. Continue only if you are on Stellar Testnet.',
+          message: 'Unable to verify Freighter network. Continue only if you are on Stellar Testnet.',
         });
         return false;
       }
 
-      // missing/unknown/error => block sends
       setNetworkOk(false);
       setNetworkError({
-        message:
-          'Unable to verify Freighter network. Continue only if you are on Stellar Testnet.',
+        message: 'Unable to verify Freighter network. Continue only if you are on Stellar Testnet.',
       });
       return false;
     } catch {
@@ -184,7 +175,6 @@ export const useSoroban = () => {
       const amount = xlm ?? '0';
       setBalanceXlm(amount);
     } catch (e: any) {
-      // Unfunded account or not found
       const msg = String(e?.message ?? e);
       setBalanceXlm('0');
       setBalanceError(msg.includes('not_found') ? 'Account not found (unfunded).' : msg);
@@ -215,10 +205,7 @@ export const useSoroban = () => {
       setIsConnected(true);
       persistAddress(authAddress);
 
-      // Verify network mismatch (testnet requirement)
       await validateNetwork();
-
-      // Balance load
       await refreshBalance(authAddress);
     } catch (e: any) {
       setWalletError({
@@ -231,8 +218,6 @@ export const useSoroban = () => {
   }, [detectFreighter, persistAddress, refreshBalance, validateNetwork]);
 
   const disconnectWallet = useCallback(() => {
-    // Freighter doesn't always offer a "disconnect" that clears identity in-extension.
-    // We'll clear our app state and localStorage.
     setIsConnected(false);
     setAddress(null);
     setTxHash(null);
@@ -264,12 +249,12 @@ export const useSoroban = () => {
   }, [readPersistedAddress]);
 
   useEffect(() => {
-    // If we have persisted address, attempt to verify network + refresh balance.
     if (!address) return;
     validateNetwork().then(() => refreshBalance());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
 
+  // ── Fixed sendXlm: uses stellar-sdk Server for cleaner interaction ──
   const sendXlm = useCallback(
     async (destination: string, amountXlm: string) => {
       setSendLoading(true);
@@ -277,9 +262,6 @@ export const useSoroban = () => {
       setTxHash(null);
 
       try {
-        const f: any = (window as any).Freighter;
-        if (!f) throw new Error('Freighter not found.');
-
         if (!address) throw new Error('Wallet not connected.');
         if (!networkOk) {
           throw new Error('Network mismatch: please connect to Stellar Testnet.');
@@ -290,123 +272,76 @@ export const useSoroban = () => {
           throw new Error('Amount must be a positive number.');
         }
 
-        // Build payment transaction
-        // Base fee (stroops). Horizon allows fetching current base fee.
-        // If it fails, fall back to BASE_FEE from stellar-sdk.
-        const baseFeeRes = await fetch(`${horizon.url}/fee_stats`);
-        let feeNum = BASE_FEE;
+        const server = new Horizon.Server(HORIZON_TESTNET_URL);
+        const sourceAccount = await server.loadAccount(address);
+        const fee = await server.fetchBaseFee();
 
-        if (baseFeeRes.ok) {
-          const feeStats = await baseFeeRes.json();
-          // Typically: { fee_charged: 100, last_ledger_base_fee: 100, ... }
-          // We'll use last_ledger_base_fee if present; otherwise keep BASE_FEE.
-          const last = feeStats?.last_ledger_base_fee ?? feeStats?.fee_charged;
-          if (typeof last === 'number') feeNum = String(last);
-        }
-
-        const account = await fetch(`${horizon.url}/accounts/${encodeURIComponent(address)}`)
-          .then(async (r) => {
-            if (!r.ok) {
-              const body = await r.json().catch(() => null);
-              throw new Error(body?.title ?? r.statusText);
-            }
-            return r.json();
-          })
-          .then((a) => {
-            // stellar-sdk TransactionBuilder expects an account response convertible object.
-            // We can pass the Horizon account JSON directly to loadAccount via client,
-            // but we removed that client import; so we manually adapt minimal fields:
-            return a;
-          });
-
-        const op = Operation.payment({
-          destination,
-          asset: Asset.native(),
-          amount: amount.toFixed(7), // enough precision for XLM
-        });
-
-        const tx = new TransactionBuilder(
-          // TransactionBuilder accepts account-like object: { sequence, account_id, balances, ... }
-          account,
-          {
-            fee: feeNum,
-            networkPassphrase: NETWORK_PASSPHRASE,
-          }
-        )
-          .addOperation(op)
-          .addMemo(Memo.text('MaintChain testnet payment'))
+        const tx = new TransactionBuilder(sourceAccount, {
+          fee: String(fee),
+          networkPassphrase: NETWORK_PASSPHRASE,
+        })
+          .addOperation(
+            Operation.payment({
+              destination,
+              asset: Asset.native(),
+              amount: amount.toFixed(7),
+            }),
+          )
+          .addMemo(Memo.text('MaintChain payment'))
           .setTimeout(30)
           .build();
 
-        // Serialize to XDR
         const txXDR = tx.toXDR();
-
         const signed = await freighterSignTransaction(txXDR, {
           networkPassphrase: NETWORK_PASSPHRASE,
           address,
         });
 
-        if (signed.error) {
-          throw new Error(signed.error.message);
-        }
+        if (signed.error) throw new Error(signed.error.message);
+        if (!signed.signedTxXdr) throw new Error('Signing failed — no signed XDR returned.');
 
-        const signedXDR = signed.signedTxXdr;
-
-        if (!signedXDR) throw new Error('Signing failed.');
-
-        // Submit signed tx to Horizon
-        const res = await fetch(`${horizon.url}/transactions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tx_blob: signedXDR }),
-        });
-
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          const title = body?.title ?? res.statusText;
-          throw new Error(title);
-        }
-
-        const body = await res.json();
-        const hash = body?.hash ?? tx.hash().toString();
-        setTxHash(hash);
-        return hash;
+        const parsedTx = TransactionBuilder.fromXDR(signed.signedTxXdr, NETWORK_PASSPHRASE);
+        const result = await server.submitTransaction(parsedTx);
+        setTxHash(result.hash);
+        return result.hash;
       } catch (e: any) {
-        setSendError(String(e?.message ?? e));
+        const msg = String(e?.message ?? e ?? 'Unknown error');
+        setSendError(msg);
         throw e;
       } finally {
         setSendLoading(false);
       }
     },
-    [address, networkOk, horizon]
+    [address, networkOk],
   );
 
-  // Best-effort disconnect handler if Freighter exposes events.
-  useEffect(() => {
-    // The package API does not expose a stable event subscription surface here.
-    // Persisted address + explicit reconnect cover refreshes safely.
-  }, [disconnectWallet]);
+  // ── Fixed callContract: uses Soroban service instead of window.Freighter ──
+  const callContract = useCallback(
+    async (
+      contractId: string,
+      functionName: string,
+      args: any[],
+      options?: { simulate?: boolean },
+    ) => {
+      if (!address) throw new Error('Wallet not connected');
 
-  const callContract = useCallback(async (contractId: string, functionName: string, args: any[]) => {
-    if (!window || !(window as any).Freighter) {
-      throw new Error('Freighter not found');
-    }
+      const scValArgs = args.map((arg) => {
+        if (typeof arg === 'string' && /^0x[0-9a-f]{64}$/i.test(arg)) {
+          return bytes32ScVal(arg);
+        }
+        return toScVal(arg);
+      });
 
-    // Freighter contract invocation signature varies across versions.
-    // Common pattern is identity/invokeContract.
-    const f: any = (window as any).Freighter;
+      if (options?.simulate) {
+        return simulateContract(contractId, functionName, scValArgs);
+      }
 
-    if (typeof f.invokeContract !== 'function') {
-      throw new Error('Freighter invokeContract not available in this version.');
-    }
-
-    // Expected to return a result containing tx hash / status.
-    const result = await f.invokeContract(contractId, functionName, args);
-    return result;
-  }, []);
+      return invokeContract(contractId, functionName, scValArgs, address);
+    },
+    [address],
+  );
 
   return {
-    // wallet
     freighterInstalled,
     isConnected,
     address,
@@ -414,23 +349,19 @@ export const useSoroban = () => {
     disconnectWallet,
     walletError,
 
-    // network
     networkOk,
     networkError,
 
-    // balance
     balanceLoading,
     balanceXlm,
     balanceError,
     refreshBalance,
 
-    // transaction
     sendLoading,
     sendXlm,
     txHash,
     sendError,
 
-    // contract
     callContract,
   };
 };
