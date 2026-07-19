@@ -1,0 +1,20 @@
+# ── MaintChain Render Blueprint ──
+# Infrastructure-as-code for Render.com deployment.
+# Deploy by connecting this GitHub repo to Render Blueprints.
+# See: https://render.com/docs/blueprint-spec
+
+services:
+  # Backend: Rust Axum API (Docker)
+  - type: web
+    name: maintchain-backend
+    runtime: docker
+    dockerfilePath: Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false  # Set manually in Render dashboard — use your Supabase connection string
+      - key: RUST_LOG
+        value: info
+      # Do NOT set PORT — Render injects its own.
+      # The backend reads $PORT from environment, falls back to 8081.
+      # Dockerfile at repo root: build context is the repo itself.
