@@ -6,7 +6,7 @@
 # Stage 2: Copy only the binary into a slim runtime image
 
 # ─── Stage 1: Builder ────────────────────────────────────
-FROM rust:1.80-slim-bookworm AS builder
+FROM rust:1.85-slim-bookworm AS builder
 
 # Install build dependencies for sqlx (postgres) and Soroban
 RUN apt-get update && apt-get install -y --no-install-recommends \
