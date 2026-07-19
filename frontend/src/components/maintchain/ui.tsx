@@ -3,10 +3,9 @@ import { ArrowRight, CheckCircle2, Clock3, ShieldAlert, Sparkles } from 'lucide-
 import type { ReactNode } from 'react';
 
 import type { LeaderboardGroup, StatusTone, Worker } from '@/data/maintchain';
+import { cn } from '@/lib/utils';
 
-export function cn(...values: Array<string | false | null | undefined>) {
-  return values.filter(Boolean).join(' ');
-}
+export { cn };
 
 /**
  * Editorial section header (v2).

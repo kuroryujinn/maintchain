@@ -180,3 +180,14 @@ export function bytes32ScVal(hex: string): xdr.ScVal {
   const bytes = Buffer.from(cleanHex, 'hex');
   return xdr.ScVal.scvBytes(bytes);
 }
+
+/**
+ * Convert a string to a Soroban BytesN<32> hex value.
+ * Pads the UTF-8 encoded string to 32 bytes, then returns as a 0x-prefixed hex string.
+ * Used for passing maintenance IDs and other string identifiers to Soroban contracts.
+ */
+export function toBytesN32(str: string): string {
+  return '0x' + Array.from(new TextEncoder().encode(str.padEnd(32, '\0')))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}

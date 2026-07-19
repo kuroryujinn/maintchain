@@ -20,6 +20,7 @@ const workflowNav = [
   { href: '/upload', label: 'Upload' },
   { href: '/approve', label: 'Approve' },
   { href: '/audit', label: 'Audit' },
+  { href: '/technician', label: 'My Tasks' },
 ];
 
 export default function Nav() {

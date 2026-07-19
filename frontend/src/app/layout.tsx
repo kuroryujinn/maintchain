@@ -1,8 +1,12 @@
 import './globals.css';
 import { Inter, Inter_Tight, JetBrains_Mono } from 'next/font/google';
+import { GeistSans } from 'geist/font/sans';
 
 import Nav from '@/components/maintchain/Nav';
 import RouteShell from '@/components/maintchain/RouteShell';
+import { cn } from "@/lib/utils";
+
+const geist = GeistSans;
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const interTight = Inter_Tight({ subsets: ['latin'], variable: '--font-inter-tight' });
@@ -19,7 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${interTight.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={cn(interTight.variable, inter.variable, jetbrainsMono.variable, "font-sans", geist.variable)}>
       <body className={`${inter.className} min-h-screen bg-slate-100 text-slate-900`}>
         <Nav />
         <RouteShell>

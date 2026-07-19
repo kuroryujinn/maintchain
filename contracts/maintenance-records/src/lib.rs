@@ -2,13 +2,14 @@
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env};
 
 #[contracttype]
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum MaintenanceStatus {
     Open = 0,
     Submitted = 1,
     PendingApproval = 2,
     Compliant = 3,
     Rejected = 4,
+    PendingAudit = 5,
 }
 
 #[contracttype]
@@ -65,6 +66,18 @@ impl MaintenanceRecords {
 
         order.status = new_status;
 
+        env.storage().instance().set(&maintenance_id, &order);
+    }
+
+    /// Complete a maintenance record (transition to Compliant).
+    /// Should only be called by the ComplianceAttestation contract.
+    pub fn complete_record(env: Env, maintenance_id: BytesN<32>) {
+        let mut order: MaintenanceOrder = env.storage().instance().get(&maintenance_id)
+            .expect("Maintenance record not found");
+
+        assert_eq!(order.status, MaintenanceStatus::PendingApproval, "Must be PendingApproval to complete");
+
+        order.status = MaintenanceStatus::Compliant;
         env.storage().instance().set(&maintenance_id, &order);
     }
 

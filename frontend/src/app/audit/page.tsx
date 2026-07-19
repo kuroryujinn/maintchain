@@ -5,10 +5,15 @@ import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/m
 import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
 import type { AuditResponse } from '@/lib/api-types';
-import { AlertCircle, CheckCircle2, Clock3 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, ExternalLink } from 'lucide-react';
+import { toBytesN32 } from '@/lib/soroban';
+
+const COMPLIANCE_ATTESTATION_ID = process.env.NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID || '';
+const MULTI_PARTY_APPROVAL_ID = process.env.NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID || '';
+const MAINTENANCE_RECORDS_ID = process.env.NEXT_PUBLIC_MAINTENANCE_RECORDS_ID || '';
 
 export default function AuditTimeline() {
-  const { connectWallet, isConnected } = useSoroban();
+  const { connectWallet, isConnected, callContract, address } = useSoroban();
 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,10 +41,32 @@ export default function AuditTimeline() {
     setError(null);
 
     try {
+      // 1. Issue certificate via backend API
       const result = await api.auditorApprove(id, {
         decision_note: 'Compliance verified — evidence and approval chain complete.',
       });
-      setTxHash(`Certificate issued → Status: ${result.status}`);
+
+      // 2. Also issue certificate on-chain via Soroban (if wallet connected)
+      let onChainTx: string | null = null;
+      if (isConnected && COMPLIANCE_ATTESTATION_ID && MULTI_PARTY_APPROVAL_ID && MAINTENANCE_RECORDS_ID && address) {
+        try {
+          // Generate a random cert hash
+          const certHash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+          const idBytes32 = toBytesN32(id);
+          const txResult = await callContract(
+            COMPLIANCE_ATTESTATION_ID,
+            'issue_certificate',
+            [MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID, idBytes32, certHash]
+          );
+          onChainTx = txResult.transactionHash;
+        } catch (sorobanError) {
+          console.warn('Soroban issue_certificate failed:', sorobanError);
+        }
+      }
+
+      const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
+      setTxHash(`Certificate issued → Status: ${result.status}${txInfo}`);
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
       setError(message);
@@ -111,9 +138,26 @@ export default function AuditTimeline() {
                           <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">
                             {event.decision ?? 'Pending'}
                           </div>
+                          {event.note && (
+                            <div className="mt-1 text-xs text-[var(--text-secondary)] italic">
+                              &quot;{event.note}&quot;
+                            </div>
+                          )}
                           <div className="mt-1 text-xs text-[var(--text-tertiary)]">
                             {new Date(event.approval_timestamp).toLocaleString()}
                           </div>
+                          {/* Link to on-chain transaction */}
+                          {event.on_chain_tx_id && (
+                            <a
+                              href={`https://stellar.expert/explorer/testnet/tx/${event.on_chain_tx_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--primary)] font-mono hover:underline"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              View on-chain → {event.on_chain_tx_id.slice(0, 12)}...
+                            </a>
+                          )}
                         </div>
                       </div>
                     ))
@@ -177,7 +221,7 @@ export default function AuditTimeline() {
           <FadeInView direction="up" distance="sm" duration={400} delay={80} className="grid gap-4 sm:grid-cols-3">
             <DetailPanel glass label="Timeline source">Fetched from GET /maintenance/:id/audit</DetailPanel>
             <DetailPanel glass label="Certificate action">Issued via POST /maintenance/:id/approvals/auditor</DetailPanel>
-            <DetailPanel glass label="Verification target">Keep audit proof readable without crypto-first aesthetics.</DetailPanel>
+            <DetailPanel glass label="Verification target">Every event links to an on-chain transaction hash.</DetailPanel>
           </FadeInView>
         </div>
       )}

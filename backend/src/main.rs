@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -17,6 +17,8 @@ use std::net::SocketAddr;
 
 mod audit;
 mod complaint;
+mod soroban_client;
+mod storage;
 #[allow(dead_code)]
 mod seed;
 use audit::{approve_by_auditor, get_audit_trail};
@@ -97,6 +99,9 @@ struct RegisterEquipmentRequest {
     equipment_id: Uuid,
     owner_id: Uuid,
     metadata_hash: Option<String>,
+    serial_number: Option<String>,
+    name: Option<String>,
+    location: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,6 +187,9 @@ struct EquipmentRow {
     id: Uuid,
     owner_id: Uuid,
     metadata_hash: Option<String>,
+    serial_number: Option<String>,
+    name: Option<String>,
+    location: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -193,7 +201,7 @@ async fn list_equipment(
     State(state): State<AppState>,
 ) -> Result<Json<EquipmentListResponse>, (StatusCode, String)> {
     let rows = sqlx::query_as::<_, EquipmentRow>(
-        r#"SELECT id, owner_id, metadata_hash FROM equipment ORDER BY id"#,
+        r#"SELECT id, owner_id, metadata_hash, serial_number, name, location FROM equipment ORDER BY id"#,
     )
     .fetch_all(&state.db)
     .await
@@ -242,16 +250,22 @@ async fn register_equipment(
 
     let res = sqlx::query(
         r#"
-        insert into equipment (id, owner_id, metadata_hash)
-        values ($1, $2, $3)
+        insert into equipment (id, owner_id, metadata_hash, serial_number, name, location)
+        values ($1, $2, $3, $4, $5, $6)
         on conflict (id) do update set
           owner_id = excluded.owner_id,
-          metadata_hash = excluded.metadata_hash
+          metadata_hash = excluded.metadata_hash,
+          serial_number = excluded.serial_number,
+          name = excluded.name,
+          location = excluded.location
         "#,
     )
     .bind(req.equipment_id)
     .bind(req.owner_id)
     .bind(req.metadata_hash)
+    .bind(req.serial_number)
+    .bind(req.name)
+    .bind(req.location)
     .execute(&state.db)
     .await;
 
@@ -501,6 +515,192 @@ async fn compute_hash(Json(req): Json<EvidencePayloadForHashing>) -> impl IntoRe
     Json(serde_json::json!({ "evidence_hash": hash }))
 }
 
+async fn upload_evidence_file(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let mut file_name = String::new();
+    let mut file_bytes = Vec::new();
+
+    while let Some(field) = multipart.next_field().await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))? {
+        if let Some(name) = field.name().map(String::from) {
+            file_name = name;
+        }
+        file_bytes = field.bytes().await
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
+            .to_vec();
+    }
+
+    if file_bytes.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "No file uploaded".to_string()));
+    }
+
+    // Compute SHA-256 hash of the file for on-chain storage
+    let evidence_hash = storage::compute_file_hash(&file_bytes);
+
+    // Attempt IPFS upload if Pinata credentials are configured
+    let ipfs_cid = match (
+        std::env::var("PINATA_API_KEY"),
+        std::env::var("PINATA_API_SECRET"),
+    ) {
+        (Ok(key), Ok(secret)) => {
+            match storage::upload_to_ipfs(&key, &secret, &file_name, file_bytes).await {
+                Ok(cid) => Some(cid),
+                Err(_) => None,
+            }
+        }
+        _ => None,
+    };
+
+    // Update the maintenance record with the evidence hash
+    sqlx::query(
+        r#"
+        UPDATE maintenance_records
+        SET evidence_hash = $1,
+            status = 'SUBMITTED'
+        WHERE id = $2
+        "#,
+    )
+    .bind(&evidence_hash)
+    .bind(id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "evidence_hash": evidence_hash,
+        "ipfs_cid": ipfs_cid,
+        "file_name": file_name,
+        "status": "submitted"
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct RegisterUserRequest {
+    stellar_address: String,
+    name: String,
+    role: String,
+    organization: Option<String>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct UserResponse {
+    id: Uuid,
+    stellar_address: Option<String>,
+    name: String,
+    role: String,
+    organization: Option<String>,
+    created_at: DateTime<Utc>,
+}
+
+async fn register_user(
+    State(state): State<AppState>,
+    Json(req): Json<RegisterUserRequest>,
+) -> Result<(StatusCode, Json<UserResponse>), (StatusCode, String)> {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO users (id, stellar_address, name, role, organization) VALUES ($1, $2, $3, $4, $5)"#,
+    )
+    .bind(id)
+    .bind(&req.stellar_address)
+    .bind(&req.name)
+    .bind(&req.role)
+    .bind(&req.organization)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        error!("register_user failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    let row = sqlx::query_as::<_, UserResponse>(
+        r#"SELECT id, stellar_address, name, role, organization, created_at FROM users WHERE id = $1"#,
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok((StatusCode::CREATED, Json(row)))
+}
+
+async fn get_user_by_stellar(
+    State(state): State<AppState>,
+    Path(stellar_address): Path<String>,
+) -> Result<Json<UserResponse>, (StatusCode, String)> {
+    let row = sqlx::query_as::<_, UserResponse>(
+        r#"SELECT id, stellar_address, name, role, organization, created_at FROM users WHERE stellar_address = $1"#,
+    )
+    .bind(&stellar_address)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| (StatusCode::NOT_FOUND, "user not found".to_string()))?;
+    Ok(Json(row))
+}
+
+async fn list_pending_approvals(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<MaintenanceResponse>>, (StatusCode, String)> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id AS maintenance_id, equipment_id, technician_id,
+               status::text AS status, evidence_hash, created_at
+        FROM maintenance_records
+        WHERE status IN ('SUBMITTED', 'PENDING_APPROVAL')
+        ORDER BY created_at DESC
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(rows.into_iter().map(row_to_maintenance_response).collect()))
+}
+
+#[derive(Debug, Serialize)]
+struct ComplianceDashboardResponse {
+    total_equipment: i64,
+    compliant_records: i64,
+    pending_records: i64,
+    rejected_records: i64,
+    compliance_score: f64,
+    overdue_count: i64,
+}
+
+async fn compliance_dashboard(
+    State(state): State<AppState>,
+) -> Result<Json<ComplianceDashboardResponse>, (StatusCode, String)> {
+    let total: (i64,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM equipment")
+        .fetch_one(&state.db).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let compliant: (i64,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM maintenance_records WHERE status = 'COMPLIANT'")
+        .fetch_one(&state.db).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let pending: (i64,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM maintenance_records WHERE status IN ('SUBMITTED', 'PENDING_APPROVAL')")
+        .fetch_one(&state.db).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let rejected: (i64,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM maintenance_records WHERE status = 'REJECTED'")
+        .fetch_one(&state.db).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let total_records = compliant.0 + pending.0 + rejected.0;
+    let score = if total_records > 0 { (compliant.0 as f64 / total_records as f64) * 100.0 } else { 0.0 };
+
+    Ok(Json(ComplianceDashboardResponse {
+        total_equipment: total.0,
+        compliant_records: compliant.0,
+        pending_records: pending.0,
+        rejected_records: rejected.0,
+        compliance_score: score,
+        overdue_count: 0,
+    }))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -572,6 +772,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/maintenance/orders", post(create_maintenance_order))
         .route("/maintenance/:id", get(get_maintenance))
         .route("/maintenance/:id/evidence", post(submit_evidence))
+        .route("/maintenance/:id/evidence/upload", post(upload_evidence_file))
         .route(
             "/maintenance/:id/approvals/supervisor",
             post(supervisor_approve),
@@ -580,15 +781,19 @@ async fn main() -> anyhow::Result<()> {
             "/maintenance/:id/approvals/supervisor/reject",
             post(supervisor_reject),
         )
-        .route("/maintenance/:id/audit", get(get_audit_trail))
-        .route(
-            "/maintenance/:id/approvals/auditor",
+        .route("/maintenance/:id/audit", get(get_audit_trail))        .route("/maintenance/:id/approvals/auditor",
             post(approve_by_auditor),
         )
+        .route("/maintenance/pending", get(list_pending_approvals))
+        .route("/compliance/dashboard", get(compliance_dashboard))
+        .route("/users", post(register_user))
+        .route("/users/:stellar_address", get(get_user_by_stellar))
         .layer(cors)
         .with_state(state);
 
-    let addr: SocketAddr = "127.0.0.1:8081".parse()?;
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8081".to_string());
+    let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()
+        .expect("Invalid PORT value; must be a valid port number");
 
     info!("backend listening on http://{addr}");
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;

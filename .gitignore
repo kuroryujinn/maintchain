@@ -22,8 +22,7 @@ dist/
 build/
 
 # Environment
-.env
-.env.local
+*.env
 
 # Logs
 *.log
@@ -33,4 +32,4 @@ build/
 
 # IDE
 .vscode/
-.idea/
+.idea/frontend/nul

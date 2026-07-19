@@ -23,6 +23,7 @@ pub struct AuditEvent {
     pub decision: Option<String>,
     pub approval_timestamp: DateTime<Utc>,
     pub note: Option<String>,
+    pub on_chain_tx_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +46,7 @@ fn row_to_event(row: sqlx::postgres::PgRow) -> AuditEvent {
         decision: row.get("decision"),
         approval_timestamp: row.get("approval_timestamp"),
         note: row.get("note"),
+        on_chain_tx_id: row.get("on_chain_tx_id"),
     }
 }
 
@@ -97,7 +99,8 @@ pub async fn get_audit_trail(
             role,
             decision,
             approval_timestamp,
-            note
+            note,
+            on_chain_tx_id
         from approvals
         where maintenance_id = $1
         order by approval_timestamp asc, id asc

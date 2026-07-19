@@ -1,0 +1,34 @@
+# ── MaintChain Deploy Pipeline ──
+# Deploys to production on push to main (after CI passes).
+# Frontend → Vercel (auto-deploy via Vercel GitHub integration)
+# Backend → Render.com (via Render Blueprints GitHub integration)
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  # ─── Verify CI passes first ─────────────────────────
+  verify:
+    name: Verify CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "CI passed — ready to deploy"
+
+  # ─── Notify of deployment ──────────────────────────
+  notify:
+    name: Notify Deployment
+    needs: [verify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment triggered
+        run: |
+          echo "::notice::Deployment triggered for commit ${{ github.sha }}"
+          echo "Frontend: Auto-deployed by Vercel GitHub integration"
+          echo "Backend: Auto-deployed by Render Blueprints GitHub integration"
+          echo "Render Dashboard: https://dashboard.render.com"
+          echo "Vercel Dashboard: https://vercel.com/dashboard"

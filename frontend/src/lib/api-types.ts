@@ -17,12 +17,18 @@ export interface EquipmentResponse {
   equipment_id: string;
   owner_id: string;
   metadata_hash: string | null;
+  serial_number: string | null;
+  name: string | null;
+  location: string | null;
 }
 
 export interface RegisterEquipmentRequest {
   equipment_id: string;
   owner_id: string;
   metadata_hash?: string;
+  serial_number?: string;
+  name?: string;
+  location?: string;
 }
 
 // ─── Maintenance Records ─────────────────────────────────────
@@ -59,6 +65,7 @@ export interface AuditEvent {
   decision: string | null;
   approval_timestamp: string;
   note: string | null;
+  on_chain_tx_id: string | null;
 }
 
 export interface AuditResponse {

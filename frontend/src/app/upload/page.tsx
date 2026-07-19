@@ -5,9 +5,12 @@ import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/m
 import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
 import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
+import { toBytesN32 } from '@/lib/soroban';
+
+const MAINTENANCE_RECORDS_ID = process.env.NEXT_PUBLIC_MAINTENANCE_RECORDS_ID || '';
 
 export default function EvidenceUpload() {
-  const { address, connectWallet, isConnected } = useSoroban();
+  const { address, connectWallet, isConnected, callContract } = useSoroban();
   const [file, setFile] = useState<File | null>(null);
   const [maintenanceId, setMaintenanceId] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -30,7 +33,25 @@ export default function EvidenceUpload() {
         evidence_hash: hash.evidence_hash,
       });
 
-      setUploadResult(`Evidence submitted! Status: ${result.status}`);
+      // 3. Also submit evidence hash on-chain via Soroban (if wallet connected)
+      let onChainTx: string | null = null;
+      if (isConnected && MAINTENANCE_RECORDS_ID && address) {
+        try {
+          const idBytes32 = toBytesN32(maintenanceId);
+          const txResult = await callContract(
+            MAINTENANCE_RECORDS_ID,
+            'submit_evidence',
+            [idBytes32, hash.evidence_hash]
+          );
+          onChainTx = txResult.transactionHash;
+        } catch (sorobanError) {
+          // Soroban call failed — continue with backend-only submission
+          console.warn('Soroban submit_evidence failed:', sorobanError);
+        }
+      }
+
+      const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
+      setUploadResult(`Evidence submitted! Status: ${result.status}${txInfo}`);
     } catch (error) {
       const message = error instanceof ApiError ? `${error.code}: ${error.message}` : 'Upload failed';
       setUploadError(message);

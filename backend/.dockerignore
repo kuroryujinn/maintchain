@@ -1,0 +1,13 @@
+# ── MaintChain Backend .dockerignore ──
+# Exclude files not needed for production build
+
+target/
+.env
+.env.local
+*.env
+.git/
+.gitignore
+*.md
+docker-compose*.yml
+Dockerfile
+railway.json

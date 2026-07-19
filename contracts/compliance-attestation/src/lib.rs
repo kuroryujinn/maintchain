@@ -1,7 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env};
-
-
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, vec, Address, BytesN, Env, IntoVal, Val};
 
 #[contracttype]
 #[derive(Clone)]
@@ -24,34 +22,35 @@ impl ComplianceAttestation {
         maintenance_id: BytesN<32>,
         cert_hash: BytesN<32>,
     ) -> BytesN<32> {
-        // NOTE: Current codebase uses short symbols (max 9 chars) in this repo.
-        // This contract therefore cannot call the long function names directly.
-        // Replace these symbols to match your actual exported function names.
-        // TODO: Cross-contract invocation wiring needs to match your exact
-        // Soroban SDK invocation API for v26.1.0.
-        // For now, stub eligibility to get the crate compiling.
-        let is_eligible: bool = true;
-
+        // 1. Call MultiPartyApproval.verify_compliance to check eligibility.
+        // Symbol "verify" (6 chars) matches the exported symbol from multi-party-approval.
+        let args: soroban_sdk::Vec<Val> = vec![&env, maintenance_id.clone().into_val(&env)];
+        let is_eligible: bool = env.invoke_contract(
+            &approval_contract_id,
+            &symbol_short!("verify"),
+            args,
+        );
 
         if !is_eligible {
             panic!("Maintenance record is not eligible for compliance certification");
         }
 
-        // Using a placeholder issuer for now; `env.auth()` is not available
-        // in this SDK version for contract code.
+        // 2. Issue attestation on-chain
         let attestation = Attestation {
             issued_at: env.ledger().timestamp(),
-            issuer: approval_contract_id,
+            issuer: env.current_contract_address(),
             cert_hash: cert_hash.clone(),
         };
-
-
         env.storage().instance().set(&maintenance_id, &attestation);
 
-    // TODO: update status in MaintenanceRecords via cross-contract call.
-    // Disabled for now to make the crate compile.
-    let _ = (records_contract_id, maintenance_id);
-
+        // 3. Update MaintenanceRecords status to Compliant via cross-contract call.
+        // Symbol "complete" (8 chars) matches the exported symbol from maintenance-records.
+        let complete_args: soroban_sdk::Vec<Val> = vec![&env, maintenance_id.into_val(&env)];
+        env.invoke_contract::<()>(
+            &records_contract_id,
+            &symbol_short!("complete"),
+            complete_args,
+        );
 
         cert_hash
     }
@@ -60,7 +59,3 @@ impl ComplianceAttestation {
         env.storage().instance().get(&maintenance_id).expect("Attestation not found")
     }
 }
-
-
-
-

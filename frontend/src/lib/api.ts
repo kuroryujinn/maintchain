@@ -93,6 +93,9 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  listPendingApprovals: () =>
+    request<MaintenanceResponse[]>('/maintenance/pending'),
+
   // ─── Supervisor Approvals ──────────────────────────
   supervisorApprove: (id: string, data: SupervisorDecisionRequest) =>
     request<MaintenanceResponse>(`/maintenance/${encodeURIComponent(id)}/approvals/supervisor`, {
