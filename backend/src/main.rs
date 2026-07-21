@@ -703,18 +703,24 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
     // ── DATABASE CONNECTION ──
-    // We use a hardcoded Supabase pooled URL (IPv4-compatible) because:
-    // 1. Render dashboard env vars keep reverting to stale values
-    // 2. The direct Supabase connection uses IPv6 which Render doesn't support
-    // 3. The pooled connection (pooler.supabase.com) works reliably on IPv4
+    // Priority order:
+    // 1. DATABASE_URL env var (set in Render dashboard or .env file)
+    // 2. POSTGRES_URL env var (alternative name)
+    // 3. Hardcoded Supabase pooled URL (IPv4-compatible fallback)
     //
-    // For local development, set DATABASE_URL env var in your shell or .env file.
-    // The dotenvy::dotenv() call above will load it from a .env file if present.
-        // Always use hardcoded Supabase pooled URL (IPv4-compatible).
-    // Render dashboard env vars are ignored because they keep reverting
-    // to stale values and the direct Supabase connection uses IPv6
-    // which Render doesn't support.
-    let database_url_raw = "postgresql://postgres.djewwnatnidmgkhiqgne:Maintchain2006@aws-1-ap-south-1.pooler.supabase.com:5432/postgres".to_string();
+    // The hardcoded fallback exists because Render dashboard env vars
+    // sometimes revert to stale values. We filter env vars to only accept
+    // URLs that point to Supabase (to catch stale Render values).
+    const SUPABASE_URL: &str = "postgresql://postgres.djewwnatnidmgkhiqgne:Maintchain2006@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres";
+
+    let database_url_raw = std::env::var("DATABASE_URL")
+        .ok()
+        .filter(|url| {
+            url.contains("supabase.co") || url.contains("pooler.supabase.com")
+        })
+        .or_else(|| std::env::var("POSTGRES_URL").ok())
+        .or_else(|| std::env::var("SUPABASE_Connection_STRING").ok())
+        .unwrap_or_else(|| SUPABASE_URL.to_string());
 
 
     let database_url_raw_prefix = database_url_raw
