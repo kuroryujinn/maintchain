@@ -3,13 +3,6 @@
 # Deploy by connecting this GitHub repo to Render Blueprints.
 # See: https://render.com/docs/blueprint-spec
 
-databases:
-  - name: maintchain-db
-    plan: free
-    databaseName: maintchain
-    user: maintchain
-    # ipAllowList omitted — defaults to internal network only (secure)
-
 services:
   # Backend: Rust Axum API (Docker)
   - type: web
@@ -19,9 +12,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: maintchain-db
-          property: connectionString
+        sync: false  # Set manually in Render dashboard — use your Supabase connection string
       - key: RUST_LOG
         value: info
       # Do NOT set PORT — Render injects its own.
