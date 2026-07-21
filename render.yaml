@@ -11,10 +11,10 @@ services:
     dockerfilePath: Dockerfile
     healthCheckPath: /health
     envVars:
-      - key: DATABASE_URL
-        value: postgresql://postgres:Maintchain2006@db.djewwnatnidmgkhiqgne.supabase.co:5432/postgres
       - key: RUST_LOG
         value: info
+      # DATABASE_URL intentionally omitted — managed via hardcoded fallback in main.rs
+      # to avoid Render blueprint env var conflicts.
       # Do NOT set PORT — Render injects its own.
       # The backend reads $PORT from environment, falls back to 8081.
       # Dockerfile at repo root: build context is the repo itself.

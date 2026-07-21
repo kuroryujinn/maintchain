@@ -706,14 +706,23 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     dotenvy::dotenv().ok();
-    // Prefer POSTGRES_URL if provided; otherwise fall back to DATABASE_URL.
-    // Supabase URLs often need `sslmode=require`.
+
+    // Hardcoded Supabase connection (IPv4-compatible pooled connection).
+    // This is the source of truth for production.
+    const SUPABASE_URL: &str = "postgresql://postgres.djewwnatnidmgkhiqgne:Maintchain2006@aws-1-ap-south-1.pooler.supabase.com:5432/postgres";
+
+    // Try env vars, but ignore obviously wrong values (e.g., pointing to localhost
+    // or using the old stale Render dashboard value). If none work, use the hardcoded URL.
     let database_url_raw = std::env::var("DATABASE_URL")
         .ok()
+        .filter(|url| {
+            // Only accept env var DATABASE_URL if it's a Supabase URL
+            // (stale/old Render dashboard values are ignored)
+            url.contains("supabase.co") || url.contains("pooler.supabase.com")
+        })
         .or_else(|| std::env::var("POSTGRES_URL").ok())
-        // Allow Supabase-specific env name used in many templates
         .or_else(|| std::env::var("SUPABASE_Connection_STRING").ok())
-        .unwrap_or_else(|| "postgres://maintchain:maintchain@localhost:5432/maintchain".to_string());
+        .unwrap_or_else(|| SUPABASE_URL.to_string());
 
 
     let database_url_raw_prefix = database_url_raw
