@@ -12,7 +12,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        sync: false  # Set manually in Render dashboard — use your Supabase connection string
+        value: postgresql://postgres:Maintchain2006@db.djewwnatnidmgkhiqgne.supabase.co:5432/postgres
       - key: RUST_LOG
         value: info
       # Do NOT set PORT — Render injects its own.
