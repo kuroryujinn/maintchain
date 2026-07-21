@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
+    "@sentry/nextjs": "^8.55.2",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^13.0.0",
     "class-variance-authority": "^0.7.1",
@@ -17,6 +18,7 @@
     "geist": "^1.7.2",
     "lucide-react": "^0.300.0",
     "next": "14.2.0",
+    "pg": "^8.22.0",
     "react": "^18",
     "react-dom": "^18",
     "shadcn": "^4.13.0",

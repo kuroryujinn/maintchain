@@ -11,20 +11,43 @@ use tracing::{info, error};
 
 use crate::soroban_client::SorobanClient;
 
-/// Check whether the maintenance record is eligible by querying the on-chain state.
-/// Uses the Soroban client to call MultiPartyApproval.verify_compliance.
+/// Check whether the maintenance record is eligible for compliance
+/// by verifying both a SUPERVISOR and an AUDITOR have approved in the database.
+/// This replaces the previous Soroban RPC call which always returned true.
 pub async fn is_eligible_for_compliance(
-    _db: &PgPool,
+    db: &PgPool,
     maintenance_id: Uuid,
 ) -> Result<bool, StatusCode> {
-    let client = SorobanClient::new();
-    // Uuid::as_bytes() returns &[u8; 16]; soroban_client accepts &[u8] and zero-extends
-    let id_bytes = maintenance_id.as_bytes();
+    let supervisor_approved: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM approvals WHERE maintenance_id = $1 AND role = 'SUPERVISOR' AND decision = 'APPROVED'"#
+    )
+    .bind(maintenance_id)
+    .fetch_one(db)
+    .await
+    .map_err(|e| {
+        error!("is_eligible_for_compliance supervisor check failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    client
-        .verify_compliance(id_bytes)
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)
+    let auditor_approved: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM approvals WHERE maintenance_id = $1 AND role = 'AUDITOR' AND decision = 'APPROVED'"#
+    )
+    .bind(maintenance_id)
+    .fetch_one(db)
+    .await
+    .map_err(|e| {
+        error!("is_eligible_for_compliance auditor check failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let eligible = supervisor_approved.0 > 0 && auditor_approved.0 > 0;
+    if !eligible {
+        info!(
+            "maintenance_id={} not eligible: supervisor_approved={}, auditor_approved={}",
+            maintenance_id, supervisor_approved.0, auditor_approved.0
+        );
+    }
+    Ok(eligible)
 }
 
 /// Transition record to COMPLIANT by triggering the on-chain attestation.

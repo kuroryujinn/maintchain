@@ -1,3 +1,5 @@
+const { withSentryConfig } = require("@sentry/nextjs");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack: (config) => {
@@ -27,4 +29,16 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// Sentry configuration — wraps Next.js config to enable:
+// - Automatic source map upload during builds
+// - Error tracking instrumentation
+// - Performance monitoring
+module.exports = withSentryConfig(nextConfig, {
+  org: "maintchain",
+  project: "maintchain-frontend",
+  silent: !process.env.CI, // Only verbose in CI
+  widenClientFileUpload: true,
+  tunnelRoute: "/monitoring",
+  hideSourceMaps: true,
+  disableLogger: true,
+});

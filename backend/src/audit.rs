@@ -12,7 +12,7 @@ use sqlx::{PgPool, Row};
 
 use uuid::Uuid;
 
-use crate::{AppState, MaintenanceResponse};
+use crate::{complaint::transition_to_compliant, AppState, MaintenanceResponse};
 
 #[derive(Debug, Serialize)]
 pub struct AuditEvent {
@@ -142,6 +142,12 @@ pub async fn approve_by_auditor(
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // After recording auditor approval, check if both supervisor + auditor have approved
+    // and transition to COMPLIANT if eligible.
+    // Ignore conflict so the auditor endpoint still returns successfully if gating isn't met
+    // (e.g., supervisor hasn't approved yet).
+    let _ = transition_to_compliant(&state.db, id).await;
 
     let row = sqlx::query(
         r#"

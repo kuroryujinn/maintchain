@@ -442,7 +442,48 @@ All landing page components pass visual inspection with zero console errors (ver
 
 ### Deployment
 
+### Deployed Infrastructure
+
+| Service | Platform | URL |
+|---------|----------|-----|
+| Frontend | Vercel | Set up via [vercel.com](https://vercel.com) — import this GitHub repo |
+| Backend (Rust API) | Render | `https://maintchain.onrender.com` |
+| Database | Supabase (pooled) | Supabase Postgres via pooler.supabase.com |
+| Smart Contracts | Stellar Testnet | 4 Soroban contracts (see table below) |
+
+### Frontend (Vercel) Deployment
+
+The frontend is a Next.js 14 app (App Router) ready for Vercel deployment:
+
+1. **Push the repo** to GitHub.
+2. In [Vercel Dashboard](https://vercel.com), click **Add New → Project** and import the GitHub repo.
+3. Vercel auto-detects Next.js. Keep the default build settings:
+   - Framework: Next.js
+   - Build Command: `next build`
+   - Output Directory: `.next`
+   - Install Command: `npm install`
+4. **Set environment variables** in Vercel Dashboard → Project Settings → Environment Variables:
+
+   ```env
+   NEXT_PUBLIC_API_URL=https://maintchain.onrender.com
+   NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+   NEXT_PUBLIC_EQUIPMENT_REGISTRY_ID=CAT57KYD2WU5QMNBSGB4FJQ37JUUQRKFDMZVPTJZVFC2H44EKWKZWWEW
+   NEXT_PUBLIC_MAINTENANCE_RECORDS_ID=CBRIGG27YRAXG5H74ZOWSSJGMSTPQHZXJCDXA23QSSBIH6VYZZR4775Z
+   NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID=CBPHZFRYKSE6PUWHU2HSNQTWBQ47GYV3U73KXPSOPIX3QLQJ7MLSJOYH
+   NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID=CBR4HHPWRDXMJJOG65B6I5TRIBBUFAXAMUCTAJANAPBAIJHPKRUTCVIN
+   ```
+
+5. **Deploy!** Vercel builds and deploys automatically. Each push to `main` triggers a redeployment.
+
+> **Note:** The `next.config.js` includes webpack aliases for `sodium-native` and `require-addon` — these are Node.js native addons that can't run in the browser. The Stellar SDK wraps them in try/catch and falls back to tweetnacl. The aliases prevent bundling errors on Vercel.
+
+### Soroban Contracts
+
 Four Soroban contracts deployed on Stellar Testnet (see table in Usage section). The `deploy-contracts.mjs` script automates WASM upload + contract deployment via Soroban RPC.
+
+### Backend (Render)
+
+The backend is containerized via Docker and deployed on Render using the `render.yaml` Blueprint. See `render.yaml` for service configuration.
 
 ## Limitations
 

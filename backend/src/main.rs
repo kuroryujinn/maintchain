@@ -9,11 +9,9 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-
-use std::cmp::min;
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};use std::cmp::min;
 use std::net::SocketAddr;
-
+use sqlx::migrate::Migrator;
 
 mod audit;
 mod complaint;
@@ -22,7 +20,6 @@ mod storage;
 #[allow(dead_code)]
 mod seed;
 use audit::{approve_by_auditor, get_audit_trail};
-use complaint::transition_to_compliant;
 
 use tower_http::cors::{Any, CorsLayer};
 
@@ -413,12 +410,10 @@ async fn supervisor_approve(
     Path(id): Path<Uuid>,
     Json(req): Json<SupervisorDecisionRequest>,
 ) -> Result<Json<MaintenanceResponse>, (StatusCode, String)> {
-    // First record supervisor approval + set status to PENDING_APPROVAL.
+    // Record supervisor approval + set status to PENDING_APPROVAL.
+    // The record stays PENDING_APPROVAL until an auditor certifies it.
+    // Compliance transition happens in approve_by_auditor after both approvals exist.
     let resp = supervisor_decision(State(state.clone()), Path(id), Json(req), "APPROVED").await?;
-
-    // Then attempt to transition to COMPLIANT (MVP gating uses current approvals table).
-    // Ignore conflict so demo flow still shows PENDING_APPROVAL if gating isn't met.
-    let _ = transition_to_compliant(&state.db, resp.maintenance_id).await;
 
     Ok(resp)
 }
@@ -707,22 +702,19 @@ async fn main() -> anyhow::Result<()> {
 
     dotenvy::dotenv().ok();
 
-    // Hardcoded Supabase connection (IPv4-compatible pooled connection).
-    // This is the source of truth for production.
-    const SUPABASE_URL: &str = "postgresql://postgres.djewwnatnidmgkhiqgne:Maintchain2006@aws-1-ap-south-1.pooler.supabase.com:5432/postgres";
-
-    // Try env vars, but ignore obviously wrong values (e.g., pointing to localhost
-    // or using the old stale Render dashboard value). If none work, use the hardcoded URL.
-    let database_url_raw = std::env::var("DATABASE_URL")
-        .ok()
-        .filter(|url| {
-            // Only accept env var DATABASE_URL if it's a Supabase URL
-            // (stale/old Render dashboard values are ignored)
-            url.contains("supabase.co") || url.contains("pooler.supabase.com")
-        })
-        .or_else(|| std::env::var("POSTGRES_URL").ok())
-        .or_else(|| std::env::var("SUPABASE_Connection_STRING").ok())
-        .unwrap_or_else(|| SUPABASE_URL.to_string());
+    // ── DATABASE CONNECTION ──
+    // We use a hardcoded Supabase pooled URL (IPv4-compatible) because:
+    // 1. Render dashboard env vars keep reverting to stale values
+    // 2. The direct Supabase connection uses IPv6 which Render doesn't support
+    // 3. The pooled connection (pooler.supabase.com) works reliably on IPv4
+    //
+    // For local development, set DATABASE_URL env var in your shell or .env file.
+    // The dotenvy::dotenv() call above will load it from a .env file if present.
+        // Always use hardcoded Supabase pooled URL (IPv4-compatible).
+    // Render dashboard env vars are ignored because they keep reverting
+    // to stale values and the direct Supabase connection uses IPv6
+    // which Render doesn't support.
+    let database_url_raw = "postgresql://postgres.djewwnatnidmgkhiqgne:Maintchain2006@aws-1-ap-south-1.pooler.supabase.com:5432/postgres".to_string();
 
 
     let database_url_raw_prefix = database_url_raw
@@ -756,6 +748,13 @@ async fn main() -> anyhow::Result<()> {
         .connect(&database_url)
         .await?;
 
+    // Run database migrations (creates tables if they don't exist)
+    // Runtime path resolves relative to working directory:
+    // - Docker: WORKDIR=/app, migrations at /app/migrations/ → "migrations"
+    // - Local: run from backend/ → "migrations" resolves to backend/migrations/
+    let migrator = Migrator::new(std::path::Path::new("migrations")).await?;
+    migrator.run(&db).await?;
+    info!("Database migrations applied successfully");
 
     let state = AppState { db };
 
