@@ -61,8 +61,13 @@ For a detailed breakdown of the problem, industry impact, and use-case scenarios
 
 > **Interactive architecture diagram:** Open [`SYSTEM_DESIGN_DIAGRAM.html`](./SYSTEM_DESIGN_DIAGRAM.html) in a browser for a visual, layer-by-layer breakdown of the entire system — including deployment infrastructure, compliance flow, and module details.
 
+---
+
 ![Live Webpage](Live-webpage.png)
+
+
 ![Mobile Responsive](Mobile-responsive.png)
+
 
 ### Smart Contracts (4 crates)
 
@@ -385,7 +390,7 @@ curl -X POST http://localhost:8081/hash/evidence \
 | `/audit` | Audit timeline with visual connected timeline and certificate issuance |
 | `/technician` | Technician task list with action buttons |
 
-*<!-- SCREENSHOT: Product UI — Evidence upload page with drag-drop zone, file preview, and submission state -->*
+
 
 ### Testnet Contract Deployments
 
@@ -465,7 +470,7 @@ A complete demo scenario (including a rejected supervisor submission followed by
 5. Audit trail retrieval
 6. Compliance certificate issuance
 
-*<!-- SCREENSHOT: Product UI — Audit timeline page showing the visual connected timeline with certificate issuance flow -->*
+
 
 ---
 
@@ -483,7 +488,6 @@ The frontend implements an **Editorial + Glass** aesthetic:
 
 All landing page components pass visual inspection with zero console errors (verified via browser at 768px and 1280px viewports).
 
-*<!-- SCREENSHOT: Mobile Responsive — Landing page on a mobile viewport (375px) showing the slide-out navigation and responsive grid layout -->*
 
 ### Contract Coverage
 
@@ -500,7 +504,7 @@ MaintChain integrates **Sentry** for error tracking and performance monitoring a
 - **Backend**: `sentry + sentry-tower` — captures server-side errors and request performance. Configurable via `SENTRY_DSN` environment variable.
 - **User Feedback**: A floating feedback widget (`FeedbackButton`) submits user feedback to Sentry's User Feedback API, capturing error context automatically.
 
-*<!-- SCREENSHOT: Analytics/Monitoring — Sentry dashboard showing error tracking, performance transactions, and session replay data for MaintChain -->*
+
 
 ### Deployment
 

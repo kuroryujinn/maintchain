@@ -5,6 +5,11 @@
 # Ignore all Markdown files except README.md
 *.md
 !README.md
+!PROJECT_GUIDE.md
+!STELLAR_INTEGRATION.md
+!SYSTEM_DESIGN.md
+
+SYSTEM_DESIGN_DIAGRAM.html
 
 # Node
 node_modules/
