@@ -31,6 +31,10 @@ impl SorobanClient {
     /// Verify compliance by calling MultiPartyApproval.verify_compliance on-chain.
     /// Returns true if all required approvals are satisfied.
     /// `maintenance_id_bytes` is a UUID (16 bytes); we zero-extend to 32 bytes for Soroban.
+    ///
+    /// NOTE: This method is reserved for future Soroban RPC integration.
+    /// Currently, compliance is checked via database queries in complaint.rs::is_eligible_for_compliance().
+    #[allow(dead_code)]
     pub async fn verify_compliance(
         &self,
         maintenance_id_bytes: &[u8],

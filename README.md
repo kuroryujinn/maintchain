@@ -61,7 +61,8 @@ For a detailed breakdown of the problem, industry impact, and use-case scenarios
 
 > **Interactive architecture diagram:** Open [`SYSTEM_DESIGN_DIAGRAM.html`](./SYSTEM_DESIGN_DIAGRAM.html) in a browser for a visual, layer-by-layer breakdown of the entire system — including deployment infrastructure, compliance flow, and module details.
 
-*<!-- SCREENSHOT: Product UI — Desktop landing page showing Hero section with Trust Replay visualization and stats -->*
+![Live Webpage](Live-webpage.png)
+![Mobile Responsive](Mobile-responsive.png)
 
 ### Smart Contracts (4 crates)
 
@@ -303,8 +304,6 @@ The dashboard displays the connected address, XLM balance (from Horizon Testnet)
 
 ### REST API (Backend :8081)
 
-> **⚠️ Important:** The examples below use `localhost:8081` for **local development only**. In production, replace `localhost:8081` with your own deployed backend URL. Do not publish or share a public backend URL — these API endpoints lack production-grade authentication and can incur hosting costs if accessed by others.
-
 **Equipment**
 
 ```bash
@@ -413,6 +412,10 @@ The script uploads each WASM blob to Soroban RPC and deploys the contract, print
 
 ---
 
+
+
+# [SYSTEM DESIGN EXPLAINED](https://maintchainsysdesign.vercel.app/)
+
 ## Validation
 
 ### Contract Tests
@@ -505,9 +508,9 @@ MaintChain integrates **Sentry** for error tracking and performance monitoring a
 
 | Service | Platform | URL / Location |
 |---------|----------|----------------|
-| Frontend | Vercel | Deploy via [vercel.com](https://vercel.com) — import this GitHub repo |
-| Backend (Rust API) | Render (self-hosted) | Deploy via `render.yaml` — URL not published (self-hosted instance) |
-| Database | PostgreSQL 16 | Self-hosted or via managed provider of your choice |
+| Frontend | Vercel | Import this GitHub repo via [vercel.com](https://vercel.com) |
+| Backend (Rust API) | Render | `https://maintchain.onrender.com` |
+| Database | Supabase | Supabase Postgres via pooler.supabase.com |
 | Smart Contracts | Stellar Testnet | 4 Soroban contracts (see [deployment table](#testnet-contract-deployments)) |
 
 ### Frontend (Vercel) Deployment
@@ -524,7 +527,7 @@ The frontend is a Next.js 14 app (App Router) ready for Vercel deployment:
 4. **Set environment variables** in Vercel Dashboard → Project Settings → Environment Variables:
 
    ```env
-   NEXT_PUBLIC_API_URL=<your_deployed_backend_url>
+   NEXT_PUBLIC_API_URL=https://maintchain.onrender.com
    NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
    NEXT_PUBLIC_EQUIPMENT_REGISTRY_ID=CAT57KYD2WU5QMNBSGB4FJQ37JUUQRKFDMZVPTJZVFC2H44EKWKZWWEW
    NEXT_PUBLIC_MAINTENANCE_RECORDS_ID=CBRIGG27YRAXG5H74ZOWSSJGMSTPQHZXJCDXA23QSSBIH6VYZZR4775Z
@@ -552,7 +555,7 @@ The backend is containerized via Docker and deployed on Render using the `render
 
 4. **API authentication is demo-grade.** The `Authorization: Bearer` header check (`API_KEY_ENV`) exists but is not wired into the router. The backend trusts all origins in development via `CorsLayer::permissive()`.
 
-5. **Database URL handling.** The backend attempts to append `?sslmode=require` to all non-HTTPS connection strings. This works for most managed Postgres providers but may conflict with connection poolers expecting `sslmode=disable`.
+5. **Database URL handling.** The backend attempts to append `?sslmode=require` to all non-HTTPS connection strings. This works for Supabase and standard Postgres but may conflict with connection poolers.
 
 6. **Placeholder pages.** Routes `/docs`, `/privacy`, `/terms`, `/contact` render generic placeholders.
 
