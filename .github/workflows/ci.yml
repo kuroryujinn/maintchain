@@ -89,7 +89,7 @@ jobs:
       - name: Setup Rust nightly toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2024-03
+          toolchain: nightly-2024-03-01
           targets: wasm32v1-none
 
       - name: Cache cargo dependencies
