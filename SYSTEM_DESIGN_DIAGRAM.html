@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MaintChain — System Architecture Diagram</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 2rem;
+      min-height: 100vh;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 0.25rem;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: #64748b;
+      font-size: 0.875rem;
+      margin-bottom: 2rem;
+    }
+    .diagram-container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* ── Layer styles ── */
+    .layer {
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      position: relative;
+      background: rgba(15,23,42,0.6);
+      backdrop-filter: blur(8px);
+    }
+    .layer-title {
+      position: absolute;
+      top: -10px;
+      left: 24px;
+      background: #0f172a;
+      padding: 0 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #94a3b8;
+    }
+
+    /* ── Presentation Layer ── */
+    .layer-presentation { border-color: rgba(37,99,235,0.3); background: rgba(37,99,235,0.03); }
+    .layer-presentation .layer-title { color: #60a5fa; }
+
+    .component-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.75rem;
+    }
+    .component {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 0.75rem;
+      text-align: center;
+      font-size: 0.8125rem;
+      transition: all 0.2s ease;
+      cursor: default;
+    }
+    .component:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(37,99,235,0.3);
+      transform: translateY(-1px);
+    }
+    .component .icon { font-size: 1.25rem; margin-bottom: 0.25rem; }
+    .component .label { color: #cbd5e1; font-weight: 500; }
+
+    /* ── Integration Layer ── */
+    .layer-integration { border-color: rgba(22,163,74,0.3); background: rgba(22,163,74,0.03); margin-top: -0.5rem; }
+    .layer-integration .layer-title { color: #4ade80; }
+
+    .integration-row {
+      display: flex;
+      gap: 1rem;
+      align-items: stretch;
+    }
+    .integration-panel {
+      flex: 1;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 1rem;
+    }
+    .integration-panel h3 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #94a3b8;
+      margin-bottom: 0.75rem;
+    }
+    .integration-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.375rem 0;
+      font-size: 0.8125rem;
+      color: #cbd5e1;
+    }
+    .integration-item::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .integration-item.before-blue::before { background: #3b82f6; }
+    .integration-item.before-green::before { background: #22c55e; }
+    .integration-item.before-amber::before { background: #f59e0b; }
+
+    /* ── Arrows ── */
+    .arrow-down {
+      text-align: center;
+      color: #475569;
+      font-size: 1.25rem;
+      padding: 0.25rem 0;
+      line-height: 1;
+    }
+
+    /* ── Blockchain Layer ── */
+    .layer-blockchain { border-color: rgba(245,158,11,0.25); background: rgba(245,158,11,0.02); }
+    .layer-blockchain .layer-title { color: #fbbf24; }
+
+    .blockchain-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
+    }
+    .contract-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(245,158,11,0.12);
+      border-radius: 14px;
+      padding: 1rem;
+      position: relative;
+    }
+    .contract-card h4 {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #fbbf24;
+      margin-bottom: 0.375rem;
+    }
+    .contract-card p {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .contract-card .badge {
+      display: inline-block;
+      font-size: 0.625rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: rgba(245,158,11,0.1);
+      color: #fbbf24;
+      padding: 0.125rem 0.5rem;
+      border-radius: 999px;
+      margin-bottom: 0.5rem;
+    }
+    .deployed-badge {
+      display: inline-block;
+      font-size: 0.625rem;
+      background: rgba(34,197,94,0.15);
+      color: #4ade80;
+      padding: 0.125rem 0.5rem;
+      border-radius: 999px;
+      margin-left: 0.375rem;
+    }
+
+    /* ── Backend + DB Layer ── */
+    .layer-backend { border-color: rgba(99,102,241,0.25); background: rgba(99,102,241,0.02); }
+    .layer-backend .layer-title { color: #818cf8; }
+
+    .backend-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 1rem;
+    }
+    .backend-section {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 1rem;
+    }
+    .backend-section h3 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #94a3b8;
+      margin-bottom: 0.75rem;
+    }
+    .endpoint-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.25rem 1rem;
+    }
+    .endpoint-item {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .endpoint-item .method {
+      color: #818cf8;
+      font-weight: 600;
+    }
+
+    .db-table-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .db-table {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      color: #cbd5e1;
+    }
+    .db-table .table-name { color: #4ade80; font-weight: 500; }
+
+    /* ── Legends ── */
+    .legend {
+      display: flex;
+      gap: 1.5rem;
+      justify-content: center;
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: #64748b;
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .legend-dot.blue { background: #3b82f6; }
+    .legend-dot.green { background: #22c55e; }
+    .legend-dot.amber { background: #f59e0b; }
+    .legend-dot.purple { background: #818cf8; }
+
+    .path-label {
+      text-align: center;
+      font-size: 0.65rem;
+      color: #475569;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 0.125rem 0;
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+      .component-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+      .blockchain-grid { grid-template-columns: 1fr; }
+      .backend-grid { grid-template-columns: 1fr; }
+      .integration-row { flex-direction: column; }
+      .endpoint-list { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="diagram-container">
+  <h1>🧱 MaintChain — System Architecture</h1>
+  <p class="subtitle">Three-layer dApp with dual-path on-chain/off-chain integration</p>
+
+  <!-- ─── PRESENTATION LAYER ─── -->
+  <div class="layer layer-presentation">
+    <div class="layer-title">Presentation Layer · Next.js 14 · Vercel</div>
+    <div class="component-grid">
+      <div class="component"><div class="icon">🏠</div><div class="label">Landing Page</div></div>
+      <div class="component"><div class="icon">📊</div><div class="label">Dashboard</div></div>
+      <div class="component"><div class="icon">📤</div><div class="label">Upload Evidence</div></div>
+      <div class="component"><div class="icon">✅</div><div class="label">Approve</div></div>
+      <div class="component"><div class="icon">🔍</div><div class="label">Audit Trail</div></div>
+      <div class="component"><div class="icon">👷</div><div class="label">Workers</div></div>
+      <div class="component"><div class="icon">⚙️</div><div class="label">Machines</div></div>
+      <div class="component"><div class="icon">📜</div><div class="label">Certificates</div></div>
+      <div class="component"><div class="icon">🏆</div><div class="label">Leaderboard</div></div>
+      <div class="component"><div class="icon">🔗</div><div class="label">Live Network</div></div>
+    </div>
+  </div>
+
+  <!-- ─── ARROW ─── -->
+  <div class="arrow-down">▼</div>
+  <div class="path-label">Freighter API | HTTP fetch</div>
+
+  <!-- ─── INTEGRATION LAYER ─── -->
+  <div class="layer layer-integration">
+    <div class="layer-title">Integration Layer</div>
+    <div class="integration-row">
+      <div class="integration-panel">
+        <h3>🔵 On-Chain Path · Soroban RPC + Freighter</h3>
+        <div class="integration-item before-amber">MultiPartyApproval.verify_compliance()</div>
+        <div class="integration-item before-amber">MultiPartyApproval.approve_by_supervisor()</div>
+        <div class="integration-item before-amber">ComplianceAttestation.issue_certificate()</div>
+        <div class="integration-item before-amber">MaintenanceRecords.submit_evidence()</div>
+        <div class="integration-item before-amber">EquipmentRegistry.register_equipment()</div>
+      </div>
+      <div class="integration-panel">
+        <h3>🟢 Off-Chain Path · REST API Client</h3>
+        <div class="integration-item before-blue">api.ts → fetch wrapper → Backend :8081</div>
+        <div class="integration-item before-blue">Evidence file upload (multipart)</div>
+        <div class="integration-item before-blue">SHA-256 hash computation</div>
+        <div class="integration-item before-blue">Audit trail retrieval (rich JOIN queries)</div>
+        <div class="integration-item before-blue">User registration & profile management</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── DUAL ARROWS ─── -->
+  <div style="display:flex; gap:0;">
+    <div style="flex:1; text-align:center;">
+      <div class="arrow-down">▼</div>
+      <div class="path-label" style="color:#f59e0b;">Soroban RPC (Soroban Testnet)</div>
+    </div>
+    <div style="flex:1; text-align:center;">
+      <div class="arrow-down">▼</div>
+      <div class="path-label" style="color:#3b82f6;">HTTP (Render :8081)</div>
+    </div>
+  </div>
+
+  <!-- ─── BLOCKCHAIN LAYER ─── -->
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <!-- Left: Contracts -->
+    <div class="layer layer-blockchain" style="margin-bottom:0;">
+      <div class="layer-title">Blockchain Layer · Stellar Soroban Testnet</div>
+      <div class="blockchain-grid">
+        <div class="contract-card">
+          <span class="badge">EquipmentRegistry</span>
+          <span class="deployed-badge">Deployed</span>
+          <p>Equipment registration with versioned ownership snapshots. Self-certifying hashes via SHA256.</p>
+        </div>
+        <div class="contract-card">
+          <span class="badge">MaintenanceRecords</span>
+          <span class="deployed-badge">Deployed</span>
+          <p>Maintenance order state machine: Open → Submitted → PendingApproval → Compliant / Rejected.</p>
+        </div>
+        <div class="contract-card">
+          <span class="badge">MultiPartyApproval</span>
+          <span class="deployed-badge">Deployed</span>
+          <p>Approval bitmap enforcing technician + supervisor + auditor sign-off. Verify_compliance = gating function.</p>
+        </div>
+        <div class="contract-card">
+          <span class="badge">ComplianceAttestation</span>
+          <span class="deployed-badge">Deployed</span>
+          <p>Certificate issuance with cross-contract calls to verify compliance and update status.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Backend + DB -->
+    <div class="layer layer-backend" style="margin-bottom:0;">
+      <div class="layer-title">Service Layer · Axum (Rust) · Render</div>
+      <div class="backend-grid" style="grid-template-columns:1fr 1fr;">
+        <div class="backend-section">
+          <h3>API Endpoints</h3>
+          <div class="endpoint-list">
+            <div class="endpoint-item"><span class="method">GET</span> /health</div>
+            <div class="endpoint-item"><span class="method">GET</span> /equipment</div>
+            <div class="endpoint-item"><span class="method">POST</span> /equipment</div>
+            <div class="endpoint-item"><span class="method">GET</span> /maintenance</div>
+            <div class="endpoint-item"><span class="method">POST</span> /maintenance/orders</div>
+            <div class="endpoint-item"><span class="method">POST</span> /maintenance/:id/evidence</div>
+            <div class="endpoint-item"><span class="method">GET</span> /maintenance/:id/audit</div>
+            <div class="endpoint-item"><span class="method">POST</span> /maintenance/:id/approvals/supervisor</div>
+            <div class="endpoint-item"><span class="method">POST</span> /maintenance/:id/approvals/auditor</div>
+            <div class="endpoint-item"><span class="method">POST</span> /hash/evidence</div>
+          </div>
+        </div>
+        <div class="backend-section">
+          <h3>PostgreSQL (Supabase)</h3>
+          <div class="db-table-list">
+            <div class="db-table"><span class="table-name">equipment</span> · Equipment records</div>
+            <div class="db-table"><span class="table-name">maintenance_records</span> · Job state</div>
+            <div class="db-table"><span class="table-name">approvals</span> · Approval events</div>
+            <div class="db-table"><span class="table-name">users</span> · Wallet registration</div>
+          </div>
+          <div style="margin-top:1rem;">
+            <h3>Modules</h3>
+            <div class="db-table-list">
+              <div class="db-table">soroban_client.rs · Soroban RPC calls</div>
+              <div class="db-table">audit.rs · Trail + auditor logic</div>
+              <div class="db-table">complaint.rs · Compliance transitions</div>
+              <div class="db-table">storage.rs · IPFS + file hashing</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── FOOTER / LEGEND ─── -->
+  <div style="margin-top:1.5rem; display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+    <div class="layer" style="margin-bottom:0; padding:1rem;">
+      <div class="layer-title">Deployment Infrastructure</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:0.8125rem;">
+        <div><span style="color:#3b82f6;">▸</span> Frontend: Vercel (maintchain.vercel.app)</div>
+        <div><span style="color:#3b82f6;">▸</span> Backend: Render (maintchain.onrender.com)</div>
+        <div><span style="color:#3b82f6;">▸</span> Database: Supabase Postgres 16</div>
+        <div><span style="color:#3b82f6;">▸</span> Blockchain: Stellar Testnet</div>
+        <div><span style="color:#3b82f6;">▸</span> Monitoring: Sentry (frontend + backend)</div>
+        <div><span style="color:#3b82f6;">▸</span> Wallet: Freighter browser extension</div>
+      </div>
+    </div>
+    <div class="layer" style="margin-bottom:0; padding:1rem;">
+      <div class="layer-title">Compliance Flow (6 Stages)</div>
+      <div style="display:flex; gap:0.25rem; font-size:0.7rem; font-family:'JetBrains Mono',monospace; color:#94a3b8; flex-wrap:wrap;">
+        <span style="background:rgba(59,130,246,0.1);padding:0.25rem 0.5rem;border-radius:4px;color:#60a5fa;">01 Fault Detection</span>
+        <span style="color:#475569;">→</span>
+        <span style="background:rgba(59,130,246,0.1);padding:0.25rem 0.5rem;border-radius:4px;color:#60a5fa;">02 Worker Accepts</span>
+        <span style="color:#475569;">→</span>
+        <span style="background:rgba(59,130,246,0.1);padding:0.25rem 0.5rem;border-radius:4px;color:#60a5fa;">03 Evidence Uploaded</span>
+        <span style="color:#475569;">→</span>
+        <span style="background:rgba(245,158,11,0.1);padding:0.25rem 0.5rem;border-radius:4px;color:#fbbf24;">04 Evidence Verified</span>
+        <span style="color:#475569;">→</span>
+        <span style="background:rgba(34,197,94,0.1);padding:0.25rem 0.5rem;border-radius:4px;color:#4ade80;">05 Approval Chain</span>
+        <span style="color:#475569;">→</span>
+        <span style="background:rgba(34,197,94,0.1);padding:0.25rem 0.5rem;border-radius:4px;color:#4ade80;">06 Certificate Issued</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot blue"></div> Off-chain (REST API)</div>
+    <div class="legend-item"><div class="legend-dot green"></div> Integration Layer</div>
+    <div class="legend-item"><div class="legend-dot amber"></div> On-chain (Soroban)</div>
+    <div class="legend-item"><div class="legend-dot purple"></div> Backend Service</div>
+  </div>
+</div>
+</body>
+</html>

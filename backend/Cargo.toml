@@ -30,6 +30,9 @@ stellar-rpc-client = { version = "21" }
 # IPFS / Pinata integration
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 
+# Monitoring & error tracking (Sentry)
+sentry = "0.48"
+sentry-tower = "0.48"
 
 [build-dependencies]
 soroban-sdk = { version = "21" } # For building contracts locally

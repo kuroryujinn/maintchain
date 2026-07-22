@@ -63,7 +63,7 @@ export default function Nav() {
             </div>
             <button
               onClick={() => setMobileNavOpen(true)}
-              className="hidden items-center gap-2 text-xs text-slate-400 transition hover:text-white lg:flex xl:hidden"
+              className="flex items-center gap-2 text-xs text-slate-400 transition hover:text-white xl:hidden"
               aria-label="Open navigation menu"
             >
               <Menu className="h-4 w-4" />

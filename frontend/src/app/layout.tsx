@@ -4,6 +4,8 @@ import { GeistSans } from 'geist/font/sans';
 
 import Nav from '@/components/maintchain/Nav';
 import RouteShell from '@/components/maintchain/RouteShell';
+import SentryErrorBoundary from '@/components/maintchain/SentryErrorBoundary';
+import FeedbackButton from '@/components/maintchain/FeedbackButton';
 import { cn } from "@/lib/utils";
 
 const geist = GeistSans;
@@ -25,12 +27,15 @@ export default function RootLayout({
   return (
     <html lang="en" className={cn(interTight.variable, inter.variable, jetbrainsMono.variable, "font-sans", geist.variable)}>
       <body className={`${inter.className} min-h-screen bg-slate-100 text-slate-900`}>
-        <Nav />
-        <RouteShell>
-          <main className="mx-auto max-w-7xl px-4 pb-20 pt-24 sm:px-6 lg:px-8">
-            {children}
-          </main>
-        </RouteShell>
+        <SentryErrorBoundary>
+          <Nav />
+          <RouteShell>
+            <main className="mx-auto max-w-7xl px-4 pb-20 pt-24 sm:px-6 lg:px-8">
+              {children}
+            </main>
+          </RouteShell>
+        </SentryErrorBoundary>
+        <FeedbackButton />
       </body>
     </html>
   );

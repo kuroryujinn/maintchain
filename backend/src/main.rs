@@ -25,6 +25,33 @@ use tower_http::cors::{Any, CorsLayer};
 
 use tracing::{error, info};
 
+// ─── Sentry / Error Tracking ─────────────────────────────────────
+use sentry_tower::NewSentryLayer;
+
+/// Initialize Sentry error tracking for the backend.
+/// Reads SENTRY_DSN from the environment. If unset, Sentry is a no-op.
+fn init_sentry() -> Option<sentry::ClientInitGuard> {
+    let dsn = std::env::var("SENTRY_DSN").ok()?;
+    if dsn.trim().is_empty() {
+        return None;
+    }
+    let guard = sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            environment: Some(
+                std::env::var("SENTRY_ENVIRONMENT")
+                    .unwrap_or_else(|_| "production".to_string())
+                    .into(),
+            ),
+            traces_sample_rate: 0.1,
+            ..Default::default()
+        },
+    ));
+    info!("Sentry error tracking initialized");
+    Some(guard)
+}
+
 // Simple API key auth (demo-grade). Production should use Stellar auth / signed requests.
 // Header: Authorization: Bearer <API_KEY>
 // NOTE: Not wired into the router yet.
@@ -702,6 +729,11 @@ async fn main() -> anyhow::Result<()> {
 
     dotenvy::dotenv().ok();
 
+    // ── SENTRY INIT ──
+    // Initialize Sentry error tracking (no-op if SENTRY_DSN is unset)
+    // The guard must be kept alive for the duration of the program.
+    let _sentry_guard = init_sentry();
+
     // ── DATABASE CONNECTION ──
     // Priority order:
     // 1. DATABASE_URL env var (set in Render dashboard or .env file)
@@ -802,6 +834,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/compliance/dashboard", get(compliance_dashboard))
         .route("/users", post(register_user))
         .route("/users/:stellar_address", get(get_user_by_stellar))
+
+        // Sentry middleware — captures performance data and errors for all requests
+        .layer(NewSentryLayer::new_from_top())
         .layer(cors)
         .with_state(state);
 
