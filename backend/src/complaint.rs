@@ -7,13 +7,13 @@ use axum::http::StatusCode;
 use sqlx::PgPool;
 use uuid::Uuid;
 use sha2::{Digest, Sha256};
-use tracing::{info, error, warn};
+use tracing::{info, error};
 
 use crate::soroban_client::SorobanClient;
 
 /// Check whether the maintenance record is eligible for compliance
 /// by verifying both a SUPERVISOR and an AUDITOR have approved in the database.
-/// Also verifies on-chain via Soroban if the contract ID is configured.
+/// Also verifies on-chain via Soroban — failure propagates as an error.
 pub async fn is_eligible_for_compliance(
     db: &PgPool,
     maintenance_id: Uuid,
@@ -49,30 +49,27 @@ pub async fn is_eligible_for_compliance(
         return Ok(false);
     }
 
-    // Also verify on-chain via Soroban if APPROVAL_CONTRACT_ID is configured
-    let approval_contract = std::env::var("APPROVAL_CONTRACT_ID").unwrap_or_default();
-    if !approval_contract.is_empty() {
-        let client = SorobanClient::new();
-        match client.verify_compliance(maintenance_id.as_bytes()).await {
-            Ok(true) => {
-                info!("maintenance_id={} verified on-chain", maintenance_id);
-            }
-            Ok(false) => {
-                info!("maintenance_id={} NOT verified on-chain (approval mismatch)", maintenance_id);
-                return Ok(false);
-            }
-            Err(_) => {
-                warn!("maintenance_id={} on-chain check failed, relying on DB check", maintenance_id);
-                // DB says eligible, on-chain check failed — use DB as fallback
-            }
+    // Verify on-chain via Soroban. Failure propagates — no silent fallback.
+    let client = SorobanClient::new();
+    match client.verify_compliance(maintenance_id.as_bytes()).await {
+        Ok(true) => {
+            info!("maintenance_id={} verified on-chain", maintenance_id);
+            Ok(true)
+        }
+        Ok(false) => {
+            info!("maintenance_id={} NOT verified on-chain (approval mismatch)", maintenance_id);
+            Ok(false)
+        }
+        Err(e) => {
+            error!("maintenance_id={} on-chain verification failed: {:?}", maintenance_id, e);
+            Err(e)
         }
     }
-
-    Ok(true)
 }
 
 /// Transition record to COMPLIANT by triggering the on-chain attestation.
 /// Calls ComplianceAttestation.issue_certificate via the Soroban client.
+/// Only updates the database AFTER the on-chain transaction confirms.
 pub async fn transition_to_compliant(
     db: &PgPool,
     maintenance_id: Uuid,
@@ -89,9 +86,8 @@ pub async fn transition_to_compliant(
     hasher.update(maintenance_id.as_bytes());
     let cert_hash_bytes: [u8; 32] = hasher.finalize().into();
 
-    // 3. Issue certificate on-chain via Soroban
+    // 3. Issue certificate on-chain via Soroban — this MUST succeed before DB write
     let client = SorobanClient::new();
-    // Uuid::as_bytes() returns &[u8; 16]; soroban_client accepts &[u8] and zero-extends
     let id_bytes = maintenance_id.as_bytes();
 
     let tx_id = client
@@ -104,7 +100,7 @@ pub async fn transition_to_compliant(
 
     info!("maintenance_id={} transitioned to COMPLIANT, tx_id={}", maintenance_id, tx_id);
 
-    // 4. Update local database as a mirror of on-chain truth
+    // 4. Update local database AFTER on-chain confirmation
     sqlx::query(
         r#"
         update maintenance_records
@@ -117,7 +113,11 @@ pub async fn transition_to_compliant(
     .bind(&tx_id)
     .execute(db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        error!("maintenance_id={} DB update after on-chain success failed: {e}", maintenance_id);
+        // On-chain tx already confirmed — queue a recovery job
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(())
 }

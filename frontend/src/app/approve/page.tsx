@@ -18,7 +18,8 @@ export default function ApprovalCenter() {
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [onChainWarning, setOnChainWarning] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [processingAction, setProcessingAction] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isConnected) return;
@@ -32,74 +33,80 @@ export default function ApprovalCenter() {
   const handleApprove = async (id: string) => {
     setTxHash(null);
     setError(null);
+    setProcessingId(id);
+    setProcessingAction('approve');
 
     try {
-      const result = await api.supervisorApprove(id, {
-        decision_note: 'Approved via MaintChain approval center',
-      });
-
-      // Also approve on-chain via Soroban (if wallet connected)
-      let onChainTx: string | null = null;
-      if (isConnected && MULTI_PARTY_APPROVAL_ID && address) {
-        try {
-          const idBytes32 = toBytesN32(id);
-          // decision=1 (APPROVED) as BytesN<32> hex string
-          const decisionHex = '0x0000000000000000000000000000000000000000000000000000000000000001';
-          const txResult = await callContract(
-            MULTI_PARTY_APPROVAL_ID,
-            'approve_by_supervisor',
-            [idBytes32, decisionHex]
-          );
-          onChainTx = txResult.transactionHash;
-        } catch (sorobanError) {
-          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
-          setOnChainWarning(`On-chain approval failed (${errMsg.slice(0, 80)}). Approval is saved in the database but the on-chain record may be incomplete.`);
-        }
+      // Validate on-chain configuration is available
+      if (!MULTI_PARTY_APPROVAL_ID) {
+        throw new Error('Contract ID not configured (NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID) — on-chain approval required');
       }
 
-      const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
-      setTxHash(`Record ${id} → Status: ${result.status}${txInfo}`);
-      // Refresh the list after approval
-      setRecords(prev => prev.filter(r => r.maintenance_id !== id));
+      // BLOCKCHAIN-FIRST: Approve on-chain via Soroban BEFORE backend/DB write.
+      // On-chain failure blocks the entire operation.
+      if (isConnected && address) {
+        const idBytes32 = toBytesN32(id);
+        const decisionHex = '0x0000000000000000000000000000000000000000000000000000000000000001';
+        const txResult = await callContract(
+          MULTI_PARTY_APPROVAL_ID,
+          'approve_by_supervisor',
+          [idBytes32, decisionHex]
+        );
+        const onChainTx = txResult.transactionHash;
+
+        // On-chain succeeded — now record in backend (DB mirror)
+        const result = await api.supervisorApprove(id, {
+          decision_note: 'Approved via MaintChain approval center',
+        });
+
+        setTxHash(`Record ${id} → Status: ${result.status} | On-chain: ${onChainTx.slice(0, 12)}...`);
+        setRecords(prev => prev.filter(r => r.maintenance_id !== id));
+      }
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
       setError(message);
+    } finally {
+      setProcessingId(null);
+      setProcessingAction(null);
     }
   };
 
   const handleReject = async (id: string) => {
     setTxHash(null);
     setError(null);
+    setProcessingId(id);
+    setProcessingAction('reject');
 
     try {
-      const result = await api.supervisorReject(id, {
-        decision_note: 'Rejected: requires additional evidence',
-      });
-
-      // Also reject on-chain via Soroban (if wallet connected)
-      let onChainTx: string | null = null;
-      if (isConnected && MULTI_PARTY_APPROVAL_ID && address) {
-        try {
-          const idBytes32 = toBytesN32(id);
-          const txResult = await callContract(
-            MULTI_PARTY_APPROVAL_ID,
-            'reject_by_supervisor',
-            [idBytes32]
-          );
-          onChainTx = txResult.transactionHash;
-        } catch (sorobanError) {
-          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
-          setOnChainWarning(`On-chain rejection failed (${errMsg.slice(0, 80)}). Rejection is saved in the database but the on-chain record may be incomplete.`);
-        }
+      // Validate on-chain configuration is available
+      if (!MULTI_PARTY_APPROVAL_ID) {
+        throw new Error('Contract ID not configured (NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID) — on-chain rejection required');
       }
 
-      const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
-      setTxHash(`Record ${id} → Status: ${result.status}${txInfo}`);
-      // Refresh the list after rejection
-      setRecords(prev => prev.filter(r => r.maintenance_id !== id));
+      // BLOCKCHAIN-FIRST: Reject on-chain via Soroban BEFORE backend/DB write.
+      if (isConnected && address) {
+        const idBytes32 = toBytesN32(id);
+        const txResult = await callContract(
+          MULTI_PARTY_APPROVAL_ID,
+          'reject_by_supervisor',
+          [idBytes32]
+        );
+        const onChainTx = txResult.transactionHash;
+
+        // On-chain succeeded — now record in backend (DB mirror)
+        const result = await api.supervisorReject(id, {
+          decision_note: 'Rejected: requires additional evidence',
+        });
+
+        setTxHash(`Record ${id} → Status: ${result.status} | On-chain: ${onChainTx.slice(0, 12)}...`);
+        setRecords(prev => prev.filter(r => r.maintenance_id !== id));
+      }
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
       setError(message);
+    } finally {
+      setProcessingId(null);
+      setProcessingAction(null);
     }
   };
 
@@ -108,7 +115,7 @@ export default function ApprovalCenter() {
       <EditorialSectionHeader
         number="01"
         title="Supervisor approval center"
-        caption="Approve · Approving or rejecting maintenance records via the backend API."
+        caption="Approve · On-chain approval via Soroban, then mirrored to backend database."
         action={<StatusBadge tone={isConnected ? 'verified' : 'pending'}>{isConnected ? 'Ready for approvals' : 'Connect wallet first'}</StatusBadge>}
       />
 
@@ -116,28 +123,17 @@ export default function ApprovalCenter() {
 
       {isConnected && (
         <div className="space-y-4">
-          {onChainWarning && (
-            <div
-              className="glass px-4 py-3 text-sm"
-              style={{ borderColor: 'rgba(217, 119, 6, 0.35)', color: '#92400e' }}
-            >
-              <div className="font-semibold flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" />
-                On-chain record incomplete
-              </div>
-              <div className="mt-1 text-xs">{onChainWarning}</div>
-            </div>
-          )}
           {(error || txHash) && (
             <div
-              className="glass px-4 py-3 text-sm"
+              className="glass px-4 py-3 text-sm motion-safe:animate-[fadeSlideUp_0.3s_ease-out]"
               style={{
                 borderColor: txHash ? 'rgba(22, 163, 74, 0.35)' : 'rgba(220, 38, 38, 0.35)',
                 color: txHash ? '#166534' : '#991b1b'
               }}
             >
-              <div className="font-semibold">
-                {txHash ? 'Approval processed' : 'Approval failed'}
+              <div className="flex items-center gap-2 font-semibold">
+                {txHash ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                {txHash ? 'On-chain approval confirmed' : 'On-chain approval failed'}
               </div>
               <div className="mt-1 font-mono text-xs">{txHash ?? error}</div>
             </div>
@@ -176,15 +172,31 @@ export default function ApprovalCenter() {
                     <div className="flex gap-3">
                       <button
                         onClick={() => handleApprove(record.maintenance_id)}
-                        className="rounded-full bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700"
+                        disabled={processingId === record.maintenance_id}
+                        className="rounded-full bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700 disabled:opacity-50"
                       >
-                        Approve
+                        {processingId === record.maintenance_id && processingAction === 'approve' ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                            Signing...
+                          </span>
+                        ) : (
+                          'Approve'
+                        )}
                       </button>
                       <button
                         onClick={() => handleReject(record.maintenance_id)}
-                        className="rounded-full bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+                        disabled={processingId === record.maintenance_id}
+                        className="rounded-full bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:opacity-50"
                       >
-                        Reject
+                        {processingId === record.maintenance_id && processingAction === 'reject' ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                            Signing...
+                          </span>
+                        ) : (
+                          'Reject'
+                        )}
                       </button>
                     </div>
                   </FadeInView>
@@ -194,7 +206,7 @@ export default function ApprovalCenter() {
           )}
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <DetailPanel glass label="Approval rule">Supervisor sign-off sent via POST /maintenance/:id/approvals/supervisor</DetailPanel>
+            <DetailPanel glass label="Approval flow">On-chain Soroban call first, then backend DB mirror</DetailPanel>
             <DetailPanel glass label="Proof context">Hashes and worker context stay attached to each record.</DetailPanel>
             <DetailPanel glass label="API integration">Records are processed by the backend at port 8081.</DetailPanel>
           </div>

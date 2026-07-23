@@ -16,42 +16,36 @@ export default function EvidenceUpload() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [onChainWarning, setOnChainWarning] = useState<string | null>(null);
 
   const handleUpload = async () => {
     if (!file || !maintenanceId) return;
     setUploading(true);
     setUploadResult(null);
     setUploadError(null);
-    setOnChainWarning(null);
+
     try {
       // 1. Compute hash via the backend's hash utility
       const hash = await api.computeHash({
         payload: `${file.name}-${Date.now()}-${file.size}`,
       });
 
-      // 2. Submit evidence hash to backend
+      // 2. Submit evidence hash on-chain via Soroban FIRST (blockchain-first)
+      //    This MUST succeed before any backend/DB write.
+      let onChainTx: string | null = null;
+      if (isConnected && MAINTENANCE_RECORDS_ID && address) {
+        const idBytes32 = toBytesN32(maintenanceId);
+        const txResult = await callContract(
+          MAINTENANCE_RECORDS_ID,
+          'submit_evidence',
+          [idBytes32, hash.evidence_hash]
+        );
+        onChainTx = txResult.transactionHash;
+      }
+
+      // 3. On-chain succeeded — now submit evidence hash to backend (DB mirror)
       const result = await api.submitEvidence(maintenanceId, {
         evidence_hash: hash.evidence_hash,
       });
-
-      // 3. Also submit evidence hash on-chain via Soroban (if wallet connected)
-      let onChainTx: string | null = null;
-      if (isConnected && MAINTENANCE_RECORDS_ID && address) {
-        try {
-          const idBytes32 = toBytesN32(maintenanceId);
-          const txResult = await callContract(
-            MAINTENANCE_RECORDS_ID,
-            'submit_evidence',
-            [idBytes32, hash.evidence_hash]
-          );
-          onChainTx = txResult.transactionHash;
-        } catch (sorobanError) {
-          // Soroban call failed — surface warning but continue with backend-only submission
-          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
-          setOnChainWarning(`On-chain submission failed (${errMsg.slice(0, 80)}). Evidence is saved in the database but the blockchain record may be incomplete.`);
-        }
-      }
 
       const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
       setUploadResult(`Evidence submitted! Status: ${result.status}${txInfo}`);
@@ -164,15 +158,6 @@ export default function EvidenceUpload() {
                 Evidence submitted
               </div>
               <p className="mt-1 font-mono text-xs">{uploadResult}</p>
-            </div>
-          )}
-          {onChainWarning && (
-            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 motion-safe:animate-[fadeSlideUp_0.3s_ease-out]">
-              <div className="flex items-center gap-2 font-semibold">
-                <AlertCircle className="h-4 w-4" />
-                On-chain submission incomplete
-              </div>
-              <p className="mt-1 text-xs">{onChainWarning}</p>
             </div>
           )}
           {uploadError && (

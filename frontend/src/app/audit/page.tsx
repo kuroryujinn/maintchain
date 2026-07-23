@@ -71,7 +71,6 @@ export default function AuditTimeline() {
 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [onChainWarning, setOnChainWarning] = useState<string | null>(null);
   const [auditData, setAuditData] = useState<AuditResponse | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [certifying, setCertifying] = useState(false);
@@ -104,7 +103,6 @@ export default function AuditTimeline() {
 
   const openCertDialog = () => {
     resetForm();
-    // Pre-fill from wallet if connected
     if (address) {
       setFormData(prev => ({ ...prev, auditorName: address.slice(0, 12) + '...' }));
     }
@@ -117,10 +115,8 @@ export default function AuditTimeline() {
     if (!formData.organization.trim()) errors.organization = 'Organization is required';
     if (!formData.certificationNotes.trim()) errors.certificationNotes = 'Certification notes are required';
 
-    // Check at least 3 of 5 checklist items
     const checkedCount = checklistItems.filter(item => formData[item.key]).length;
     if (checkedCount < 3) {
-      // We'll attach the error generically
       errors.evidenceVerified = 'Please verify at least 3 items before certifying';
     }
 
@@ -171,35 +167,32 @@ export default function AuditTimeline() {
         `━━━ End of Certification ━━━`,
       ].join('\n');
 
-      // 1. Issue certificate via backend API
-      const result = await api.auditorApprove(maintenanceId, {
-        decision_note: decisionNote,
-      });
-
-      // 2. Also issue certificate on-chain via Soroban (if wallet connected)
-      let onChainTx: string | null = null;
-      if (isConnected && COMPLIANCE_ATTESTATION_ID && MULTI_PARTY_APPROVAL_ID && MAINTENANCE_RECORDS_ID && address) {
-        try {
-          const certHash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
-            .map(b => b.toString(16).padStart(2, '0')).join('');
-          const idBytes32 = toBytesN32(maintenanceId);
-          const txResult = await callContract(
-            COMPLIANCE_ATTESTATION_ID,
-            'issue_certificate',
-            [MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID, idBytes32, certHash]
-          );
-          onChainTx = txResult.transactionHash;
-        } catch (sorobanError) {
-          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
-          setOnChainWarning(`On-chain certificate issuance failed (${errMsg.slice(0, 80)}). Certificate is recorded in the database but the blockchain record may be incomplete.`);
-        }
+      // Validate on-chain configuration is available
+      if (!COMPLIANCE_ATTESTATION_ID || !MULTI_PARTY_APPROVAL_ID || !MAINTENANCE_RECORDS_ID) {
+        throw new Error('One or more contract IDs not configured (check NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID, MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID)');
       }
 
-      const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
-      setTxHash(`Certificate issued → Status: ${result.status}${txInfo}`);
-      resetForm();
-      // Refresh the audit trail to include the new auditor approval event
-      refreshAuditTrail();
+      // BLOCKCHAIN-FIRST: Issue certificate on-chain via Soroban BEFORE backend/DB write.
+      if (isConnected && address) {
+        const certHash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
+          .map(b => b.toString(16).padStart(2, '0')).join('');
+        const idBytes32 = toBytesN32(maintenanceId);
+        const txResult = await callContract(
+          COMPLIANCE_ATTESTATION_ID,
+          'issue_certificate',
+          [MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID, idBytes32, certHash]
+        );
+        const onChainTx = txResult.transactionHash;
+
+        // On-chain succeeded — now record auditor approval in backend (DB mirror)
+        const result = await api.auditorApprove(maintenanceId, {
+          decision_note: decisionNote,
+        });
+
+        setTxHash(`Certificate issued → Status: ${result.status} | On-chain tx: ${onChainTx.slice(0, 12)}...`);
+        resetForm();
+        refreshAuditTrail();
+      }
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
       setError(message);
@@ -208,7 +201,7 @@ export default function AuditTimeline() {
     }
   };
 
-    const handleDialogClose = () => {
+  const handleDialogClose = () => {
     setDialogOpen(false);
     resetForm();
   };
@@ -218,7 +211,7 @@ export default function AuditTimeline() {
       <EditorialSectionHeader
         number="01"
         title="Audit timeline and certificate issuance"
-        caption="Audit · Fetches real audit trail from backend API and issues compliance certificates."
+        caption="Audit · Fetches real audit trail from backend API and issues compliance certificates on-chain."
         action={<StatusBadge tone={isConnected ? 'info' : 'pending'}>{isConnected ? 'Auditor session active' : 'Wallet required'}</StatusBadge>}
       />
 
@@ -241,20 +234,6 @@ export default function AuditTimeline() {
                   <h3 className="font-bold text-lg text-[var(--text-primary)]">Maintenance Event #REC-DE-4471</h3>
                 </div>
 
-                {/* On-chain warning banner */}
-                {onChainWarning && (
-                  <div
-                    className="mt-4 glass px-4 py-3 text-sm motion-safe:animate-[fadeSlideUp_0.3s_ease-out]"
-                    style={{ borderColor: 'rgba(217, 119, 6, 0.35)', color: '#92400e' }}
-                  >
-                    <div className="flex items-center gap-2 font-semibold">
-                      <AlertCircle className="h-4 w-4" />
-                      On-chain transaction incomplete
-                    </div>
-                    <div className="mt-1 text-xs">{onChainWarning}</div>
-                  </div>
-                )}
-
                 {/* Status / error banner */}
                 {(error || txHash) && (
                   <div
@@ -266,7 +245,7 @@ export default function AuditTimeline() {
                   >
                     <div className="flex items-center gap-2 font-semibold">
                       {txHash ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                      {txHash ? 'Certification processed' : 'Certification failed'}
+                      {txHash ? 'On-chain certification confirmed' : 'On-chain certification failed'}
                     </div>
                     <div className="mt-1 font-mono text-xs whitespace-pre-wrap">{txHash ?? error}</div>
                   </div>
@@ -404,7 +383,7 @@ export default function AuditTimeline() {
 
           <FadeInView direction="up" distance="sm" duration={400} delay={80} className="grid gap-4 sm:grid-cols-3">
             <DetailPanel glass label="Timeline source">Fetched from GET /maintenance/:id/audit</DetailPanel>
-            <DetailPanel glass label="Certificate action">Issued via POST /maintenance/:id/approvals/auditor</DetailPanel>
+            <DetailPanel glass label="Certificate action">On-chain Soroban call first, then backend DB mirror</DetailPanel>
             <DetailPanel glass label="Verification target">Every event links to an on-chain transaction hash.</DetailPanel>
           </FadeInView>
         </div>
@@ -462,7 +441,6 @@ export default function AuditTimeline() {
               </div>
             </div>
 
-            {/* Divider */}
             <div className="border-t border-[var(--border)]" />
 
             {/* Verification Checklist */}
@@ -510,7 +488,6 @@ export default function AuditTimeline() {
               )}
             </div>
 
-            {/* Divider */}
             <div className="border-t border-[var(--border)]" />
 
             {/* Certification Notes */}

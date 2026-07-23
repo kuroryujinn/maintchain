@@ -137,22 +137,24 @@ impl SorobanClient {
     /// Uses the Soroban RPC `simulateTransaction` endpoint. Since this is
     /// a read-only call, it doesn't need signing — we can simulate directly.
     ///
-    /// Falls back to `true` (eligible) if the on-chain check cannot be performed.
+    /// Returns an error if the on-chain check cannot be performed (missing
+    /// contract ID, missing deployer key, or RPC failure).
     pub async fn verify_compliance(
         &self,
         maintenance_id_bytes: &[u8],
     ) -> Result<bool, StatusCode> {
         let approval_contract = Self::approval_contract_id();
         if approval_contract.is_empty() {
-            info!("soroban_client: no APPROVAL_CONTRACT_ID, falling back to DB check");
-            return Ok(true);
+            error!("soroban_client: APPROVAL_CONTRACT_ID not configured — on-chain compliance check required but unavailable");
+            return Err(StatusCode::FAILED_DEPENDENCY);
         }
 
-        let secret_key = Self::deployer_secret_key();
-        if secret_key.is_none() {
-            info!("soroban_client: no DEPLOYER_SECRET_KEY for simulation, using DB check");
-            return Ok(true);
-        }
+        // Verify the deployer key exists (needed for simulate auth)
+        let _secret_key = Self::deployer_secret_key()
+            .ok_or_else(|| {
+                error!("soroban_client: DEPLOYER_SECRET_KEY not configured — on-chain compliance check required but unavailable");
+                StatusCode::FAILED_DEPENDENCY
+            })?;
 
         // Zero-extend to 32 bytes
         let mut id_32 = [0u8; 32];
@@ -176,30 +178,35 @@ impl SorobanClient {
         });
 
         let result = Self::invoke_helper(&helper_input).await.map_err(|e| {
-            warn!("soroban_client: verify_compliance simulation failed, falling back to DB check");
+            warn!("soroban_client: verify_compliance simulation failed");
             e
         })?;
 
         // Parse the boolean return value from the simulation
-        if result["success"].as_bool().unwrap_or(false) {
-            let raw = &result["raw"];
-            // The retval is a hex-encoded ScVal.
-            // Boolean true = ScvBool = type 7 = 0x00000007
-            // Boolean false = ScvBool = type 6 = 0x00000006
-            if let Some(retval) = raw["result"]["retval"].as_str() {
-                let clean = retval.trim_start_matches("0x").to_lowercase();
-                let is_true = clean.contains("00000007") || clean.contains("00000001");
-                info!("soroban_client: verify_compliance returned {}", is_true);
-                Ok(is_true)
-            } else {
-                warn!("soroban_client: simulation missing retval field, assuming eligible");
-                Ok(true)
-            }
-        } else {
-            warn!("soroban_client: verify_compliance simulation returned error: {:?}, assuming eligible",
-                result["error"]);
-            Ok(true)
+        let success = result["success"].as_bool().ok_or_else(|| {
+            error!("soroban_client: verify_compliance simulation returned invalid response — missing 'success' field");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+        if !success {
+            let err = result["error"].as_str().unwrap_or("unknown simulation error");
+            error!("soroban_client: verify_compliance simulation failed: {}", err);
+            return Err(StatusCode::BAD_GATEWAY);
         }
+
+        let raw = &result["raw"];
+        let retval = raw["result"]["retval"].as_str().ok_or_else(|| {
+            error!("soroban_client: verify_compliance simulation succeeded but missing retval field");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+        // The retval is a hex-encoded ScVal.
+        // Boolean true = ScvBool = type 7 = 0x00000007
+        // Boolean false = ScvBool = type 6 = 0x00000006
+        let clean = retval.trim_start_matches("0x").to_lowercase();
+        let is_true = clean.contains("00000007") || clean.contains("00000001");
+        info!("soroban_client: verify_compliance returned {}", is_true);
+        Ok(is_true)
     }
 
     /// Issue a compliance certificate on-chain.
@@ -208,8 +215,8 @@ impl SorobanClient {
     /// which handles XDR building, signing (with DEPLOYER_SECRET_KEY), and
     /// submission to the Soroban RPC.
     ///
-    /// Falls back to a demo placeholder tx hash if the deployer key is not
-    /// configured or if the RPC call fails.
+    /// Returns an error if the on-chain transaction fails or if required
+    /// configuration (contract IDs, deployer key) is missing.
     pub async fn issue_certificate(
         &self,
         maintenance_id_bytes: &[u8],
@@ -220,23 +227,24 @@ impl SorobanClient {
         let records_contract = Self::records_contract_id();
         let secret_key = Self::deployer_secret_key();
 
-        let can_do_onchain = !attestation_contract.is_empty()
-            && !approval_contract.is_empty()
-            && !records_contract.is_empty()
-            && secret_key.is_some();
-
-        if !can_do_onchain {
-            let reason = if secret_key.is_none() {
-                "no DEPLOYER_SECRET_KEY configured"
-            } else {
-                "contract IDs not fully configured"
-            };
-            let tx_id = format!("tx_demo_{}", uuid::Uuid::new_v4());
-            info!("soroban_client: {} — using demo tx_id={}", reason, tx_id);
-            return Ok(tx_id);
+        // All three contract IDs must be configured
+        if attestation_contract.is_empty() {
+            error!("soroban_client: ATTESTATION_CONTRACT_ID not configured — on-chain certificate issuance required");
+            return Err(StatusCode::FAILED_DEPENDENCY);
+        }
+        if approval_contract.is_empty() {
+            error!("soroban_client: APPROVAL_CONTRACT_ID not configured — on-chain certificate issuance required");
+            return Err(StatusCode::FAILED_DEPENDENCY);
+        }
+        if records_contract.is_empty() {
+            error!("soroban_client: RECORDS_CONTRACT_ID not configured — on-chain certificate issuance required");
+            return Err(StatusCode::FAILED_DEPENDENCY);
         }
 
-        let secret_key = secret_key.unwrap();
+        let secret_key = secret_key.ok_or_else(|| {
+            error!("soroban_client: DEPLOYER_SECRET_KEY not configured — on-chain certificate issuance required");
+            StatusCode::FAILED_DEPENDENCY
+        })?;
 
         // Zero-extend to 32 bytes
         let mut id_32 = [0u8; 32];
@@ -270,17 +278,23 @@ impl SorobanClient {
 
         let result = Self::invoke_helper(&helper_input).await?;
 
-        if result["success"].as_bool().unwrap_or(false) {
-            let tx_hash = result["tx_hash"].as_str().unwrap_or("unknown").to_string();
-            info!("soroban_client: issue_certificate succeeded, tx_hash={}", tx_hash);
-            Ok(tx_hash)
-        } else {
+        let success = result["success"].as_bool().ok_or_else(|| {
+            error!("soroban_client: issue_certificate response missing 'success' field");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+        if !success {
             let error_msg = result["error"].as_str().unwrap_or("unknown error");
-            error!("soroban_client: issue_certificate failed: {}", error_msg);
-            // Fall back to demo tx for resilience
-            let tx_id = format!("tx_demo_{}", uuid::Uuid::new_v4());
-            warn!("soroban_client: falling back to demo tx_id={}", tx_id);
-            Ok(tx_id)
+            error!("soroban_client: issue_certificate failed on-chain: {}", error_msg);
+            return Err(StatusCode::BAD_GATEWAY);
         }
+
+        let tx_hash = result["tx_hash"].as_str().ok_or_else(|| {
+            error!("soroban_client: issue_certificate succeeded but missing tx_hash");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+        info!("soroban_client: issue_certificate succeeded, tx_hash={}", tx_hash);
+        Ok(tx_hash.to_string())
     }
 }
