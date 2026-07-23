@@ -80,3 +80,25 @@ export interface HashRequest {
 export interface HashResponse {
   evidence_hash: string;
 }
+
+// ─── Users ────────────────────────────────────────────────────
+
+export interface UserResponse {
+  id: string;
+  stellar_address: string | null;
+  name: string;
+  role: string;
+  organization: string | null;
+  created_at: string;
+}
+
+export interface RegisterUserRequest {
+  stellar_address: string;
+  name: string;
+  role: string;
+  organization?: string;
+}
+
+export interface UserCountResponse {
+  total_users: number;
+}

@@ -12,6 +12,9 @@ import type {
   RegisterEquipmentRequest,
   SubmitEvidenceRequest,
   SupervisorDecisionRequest,
+  RegisterUserRequest,
+  UserResponse,
+  UserCountResponse,
   ApiErrorResponse,
 } from './api-types';
 
@@ -125,4 +128,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  // ─── Users ─────────────────────────────────────────
+  listUsers: () =>
+    request<UserResponse[]>('/users'),
+
+  registerUser: (data: RegisterUserRequest) =>
+    request<UserResponse>('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getUserByStellar: (stellarAddress: string) =>
+    request<UserResponse>(`/users/${encodeURIComponent(stellarAddress)}`),
+
+  userCount: () =>
+    request<UserCountResponse>('/users/count'),
 };
