@@ -63,10 +63,10 @@ For a detailed breakdown of the problem, industry impact, and use-case scenarios
 
 ---
 
-![Live Webpage][img:Live_webpage.png]
+![Live Webpage](Live_webpage.png)
 
 
-![Mobile Responsive](Mobile-responsive.png)
+![Mobile Responsive](Mobile-responsive-proof.png)
 
 
 ### Smart Contracts (4 crates)
