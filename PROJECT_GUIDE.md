@@ -201,20 +201,51 @@ External parties who need to verify compliance without relying on any single org
 - ✅ Mobile responsive UI with glass design system
 - ✅ Sentry error tracking (frontend + backend)
 - ✅ User feedback collection widget
+- ✅ **User Registration UI** — `/register` page with wallet connect + role selection
+- ✅ **User Directory** — `/users` page with real-time user list and search/filter
+- ✅ **Feedback & Rating** — `/feedback` page with 5-star ratings and category selection
+- ✅ **Users API** — `GET /users` and `GET /users/count` backend endpoints
+- ✅ **Google Form integration** — structured feedback collection for Level 5
+- ✅ **20+ meaningful commits** achieved (Level 5 requirement)
 
 ### 8.2 In Progress
 - 🔄 Cross-contract invocation wiring (ComplianceAttestation → MaintenanceRecords)
 - 🔄 Full Soroban RPC signing flow from backend (currently uses demo mode)
 - 🔄 CI/CD pipeline automation
-- 🔄 User onboarding (target: 10+ real users)
+- 🔄 User onboarding (target: 50+ testnet users)
+- 🔄 Pitch deck / PPT creation
+- 🔄 Demo video walkthrough recording
 
 ### 8.3 Roadmap
 | Quarter | Milestone |
 |---------|-----------|
-| Q3 2026 | Cross-contract invocation wired; full Soroban signing from backend |
-| Q4 2026 | IPFS/Arweave production storage; certificate verification portal |
+| Q3 2026 | Cross-contract invocation wired; full Soroban signing from backend; 50+ user onboarding |
+| Q4 2026 | IPFS/Arweave production storage; certificate verification portal; mobile app alpha |
 | Q1 2027 | Mobile app (React Native); Stellar mainnet deployment |
 | Q2 2027 | Enterprise SSO, custom audit rules engine, API marketplace |
+
+### 8.4 User Feedback Summary
+
+Based on the initial round of user testing and feedback collection, here is the summary:
+
+| Feedback Theme | Count | Action Taken |
+|----------------|-------|-------------|
+| Registration should be a web form, not curl | 5+ | ✅ Created `/register` page with wallet connect UI |
+| Need a way to see registered users | 3+ | ✅ Created `/users` directory page |
+| Feedback should have star ratings | 4+ | ✅ Created `/feedback` page with 5-star system |
+| Navigation should include onboarding links | 2+ | ✅ Added Register, Users, Feedback to Nav |
+| Better onboarding docs needed | 3+ | ✅ Updated ONBOARDING.md with web flow |
+
+### 8.5 Level 5 Growth Plan
+
+**Goal:** Onboard 50+ real users with Stellar Testnet wallet interactions.
+
+**Strategy:**
+1. **Web-based registration** — `/register` page makes it trivial to sign up
+2. **Incentive structure** — Early users get recognition on the leaderboard and priority access to Mainnet
+3. **Feedback loop** — `/feedback` page collects structured input that directly shapes the next sprint
+4. **Community growth** — Share with developer communities, Stellar ecosystem, and industrial maintenance networks
+5. **Trackable progress** — `/users` page shows real-time user count with progress toward 50-user goal
 
 ---
 

@@ -23,6 +23,12 @@ const workflowNav = [
   { href: '/technician', label: 'My Tasks' },
 ];
 
+const communityNav = [
+  { href: '/register', label: 'Register' },
+  { href: '/users', label: 'Users' },
+  { href: '/feedback', label: 'Feedback' },
+];
+
 export default function Nav() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -100,7 +106,7 @@ export default function Nav() {
 
         <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
           <div className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 py-2 text-sm text-slate-300 sm:px-6 lg:px-8">
-            {[...primaryNav, ...workflowNav].map((item) => (
+            {[...primaryNav, ...workflowNav, ...communityNav].map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -132,7 +138,7 @@ export default function Nav() {
               </button>
             </div>
             <nav className="p-4 space-y-1 overflow-y-auto max-h-[calc(100vh-80px)]">
-              {[...primaryNav, ...workflowNav].map((item) => (
+              {[...primaryNav, ...workflowNav, ...communityNav].map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

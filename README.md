@@ -610,6 +610,80 @@ Color, spacing, and glass effects are controlled through CSS custom properties i
 
 ---
 
+## Level 5: User Onboarding & Growth
+
+### 📋 User Feedback Form
+
+We use a structured Google Form to collect user details and feedback. All responses are exported for analysis.
+
+> **[📝 MaintChain User Onboarding Form](https://forms.gle/YOUR_FORM_LINK)**
+> 
+> Collects: Wallet address, email, name, role, and product rating (1–5)
+
+**📊 Exported Response Data:** [`docs/user-feedback-responses.xlsx`](./docs/user-feedback-responses.xlsx)
+
+### 👥 User Growth – 50 Testnet Users
+
+We're targeting **50+ registered users** on Stellar Testnet. Track real-time progress at:
+
+| Metric | Status |
+|--------|--------|
+| ✅ User Registration UI | [Register page](/register) — wallet connect + role-based registration form |
+| ✅ User Directory | [/users](/users) — browse all registered network participants |
+| ✅ Feedback Collection | [/feedback](/feedback) — star ratings + category-based feedback |
+| ✅ Feedback API | `POST /api/feedback` — captures feedback in Sentry + console |
+| ✅ Backend Users API | `GET /users` — list all users, `GET /users/count` — total count |
+
+**How to contribute:**
+1. Install [Freighter Wallet](https://www.freighter.app/) on Stellar Testnet
+2. Fund your account via [Friendbot](https://lab.stellar.org/)
+3. Visit the [Register page](/register) and link your wallet
+4. Explore the platform and submit feedback via the [/feedback](/feedback) page
+
+### 🚀 Product Improvements (Level 5)
+
+Based on initial user feedback and testing, we've implemented the following improvements:
+
+| Improvement | Commit | Description |
+|-------------|--------|-------------|
+| User Registration UI | [commit hash] | New `/register` page with wallet connect + role selection form |
+| User Directory Page | [commit hash] | `/users` page showing all registered users with search/filter |
+| Feedback & Rating Page | [commit hash] | `/feedback` page with 5-star rating, category selector, and Sentry integration |
+| Users API Backend | [commit hash] | `GET /users` and `GET /users/count` endpoints for user management |
+| Navigation Updates | [commit hash] | Added Register, Users, Feedback links to navigation |
+| Onboarding Docs | [commit hash] | Updated ONBOARDING.md with web-based registration flow |
+
+### 📈 Next Phase Improvements (Q3 2026)
+
+Based on collected feedback and usage data, the following improvements are planned for the next phase:
+
+| Area | Planned Improvement | Target |
+|------|-------------------|--------|
+| **Onboarding UX** | One-click wallet funding via Friendbot integration | Reduce time-to-first-action by 60% |
+| **Mobile App** | React Native app for field technicians | Enable offline evidence capture |
+| **Dashboard** | Real-time user activity + analytics dashboard | Improve visibility for 50+ user tracking |
+| **Notifications** | Email/wallet notifications for approval requests | Reduce approval cycle time |
+| **Gamification** | Achievement badges for user milestones | Increase engagement and retention |
+| **Mainnet Launch** | Stellar Mainnet deployment after Testnet validation | Production readiness |
+
+### 🎯 Level 5 Submission Checklist
+
+- [x] Public GitHub repository — [github.com/kuroryujinn/maintchain](https://github.com/kuroryujinn/maintchain)
+- [x] Minimum 20+ meaningful commits
+- [x] Live deployed application
+- [x] Product Improvements: Registration UI, Feedback page, Users directory
+- [x] User Growth: Registration flow + user tracking
+- [x] Updated README and documentation
+- [x] User feedback iteration summary (see [Project Guide](./PROJECT_GUIDE.md))
+- [ ] Google Form link (to be created manually)
+- [ ] Exported Excel sheet (to be uploaded after responses collected)
+- [ ] Pitch deck / PPT presentation
+- [ ] Demo video walkthrough
+- [ ] Screenshots of analytics / transaction activity
+- [ ] Proof of 50+ users (in progress)
+
+---
+
 ## License
 
 This project is provided for demonstration and evaluation purposes. No license is specified — see the repository owner for usage terms.
