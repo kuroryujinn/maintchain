@@ -29,10 +29,14 @@ RUN cargo build --release
 # ─── Stage 2: Runtime ────────────────────────────────────
 FROM debian:bookworm-slim
 
-# Install runtime dependencies (OpenSSL for sqlx TLS)
+# Install runtime dependencies:
+#   - libssl3 + ca-certificates for sqlx TLS
+#   - nodejs + npm for the Soroban invoke helper script (scripts/soroban-invoke.mjs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     ca-certificates \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -42,6 +46,10 @@ COPY --from=builder /app/target/release/maintchain-backend /app/maintchain-backe
 
 # Copy migration files (for reference)
 COPY backend/migrations/ /app/migrations/
+
+# Copy Soroban helper script + install its dependencies
+COPY scripts/ /app/scripts/
+RUN cd /app/scripts && npm init -y && npm install @stellar/stellar-sdk@13.0.0
 
 # Expose the port (Render injects its own PORT env var)
 EXPOSE 8081

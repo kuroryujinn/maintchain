@@ -13,6 +13,27 @@ services:
     envVars:
       - key: RUST_LOG
         value: info
+      # ── Soroban / Stellar Configuration ──
+      # The helper script path inside the Docker container:
+      - key: SOROBAN_HELPER_PATH
+        value: /app/scripts/soroban-invoke.mjs
+      # Soroban RPC endpoint (defaults to testnet)
+      - key: SOROBAN_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      # Stellar network passphrase for transaction signing
+      - key: SOROBAN_NETWORK_PASSPHRASE
+        sync: false
+      # Deployer secret key (S...) — for signing on-chain transactions
+      # Set this in Render Dashboard → Environment Variables
+      - key: DEPLOYER_SECRET_KEY
+        sync: false
+      # Deployed Soroban contract IDs
+      - key: APPROVAL_CONTRACT_ID
+        sync: false
+      - key: RECORDS_CONTRACT_ID
+        sync: false
+      - key: ATTESTATION_CONTRACT_ID
+        sync: false
       # DATABASE_URL intentionally omitted — managed via hardcoded fallback in main.rs
       # to avoid Render blueprint env var conflicts.
       # Do NOT set PORT — Render injects its own.

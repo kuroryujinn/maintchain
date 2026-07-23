@@ -23,7 +23,6 @@
 
 import { Keypair, Contract, TransactionBuilder, Networks, BASE_FEE,
   SorobanDataBuilder, xdr, nativeToScVal, Memo } from '@stellar/stellar-sdk';
-import { readFileSync } from 'fs';
 
 function hexToScVal(hex) {
   const clean = hex.replace('0x', '').padStart(64, '0');
