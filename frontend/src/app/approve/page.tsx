@@ -8,6 +8,9 @@ import { api, ApiError } from '@/lib/api';
 import type { MaintenanceResponse } from '@/lib/api-types';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toBytesN32 } from '@/lib/soroban';
+import { useTransactionState, TxState, FAILURE_STATES } from '@/hooks/useTransactionState';
+import { TransactionProgress } from '@/components/maintchain/TransactionProgress';
+import { addTxLogEvent } from '@/lib/transaction-logger';
 
 const MULTI_PARTY_APPROVAL_ID = process.env.NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID || '';
 
@@ -20,6 +23,20 @@ export default function ApprovalCenter() {
   const [error, setError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [processingAction, setProcessingAction] = useState<string | null>(null);
+
+  const txStateMachine = useTransactionState({
+    onStateChange: (newState) => {
+      if (newState === TxState.COMPLETE || FAILURE_STATES.has(newState)) {
+        addTxLogEvent({
+          walletAddress: address || '',
+          contractId: MULTI_PARTY_APPROVAL_ID,
+          method: processingAction === 'approve' ? 'approve_by_supervisor' : 'reject_by_supervisor',
+          state: newState,
+          transactionHash: txStateMachine.transactionHash || undefined,
+        });
+      }
+    },
+  });
 
   useEffect(() => {
     if (!isConnected) return;
@@ -42,11 +59,17 @@ export default function ApprovalCenter() {
         throw new Error('Contract ID not configured (NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID) — on-chain approval required');
       }
 
+      txStateMachine.reset();
+      txStateMachine.transition(TxState.SIMULATING);
+
       // BLOCKCHAIN-FIRST: Approve on-chain via Soroban BEFORE backend/DB write.
       // On-chain failure blocks the entire operation.
       if (isConnected && address) {
         const idBytes32 = toBytesN32(id);
         const decisionHex = '0x0000000000000000000000000000000000000000000000000000000000000001';
+
+        txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
+
         const txResult = await callContract(
           MULTI_PARTY_APPROVAL_ID,
           'approve_by_supervisor',
@@ -54,16 +77,22 @@ export default function ApprovalCenter() {
         );
         const onChainTx = txResult.transactionHash;
 
+        txStateMachine.transition(TxState.CONFIRMED, { hash: onChainTx });
+
         // On-chain succeeded — now record in backend (DB mirror)
+        txStateMachine.transition(TxState.DATABASE_SYNC);
+
         const result = await api.supervisorApprove(id, {
           decision_note: 'Approved via MaintChain approval center',
         });
 
+        txStateMachine.transition(TxState.COMPLETE, { hash: onChainTx });
         setTxHash(`Record ${id} → Status: ${result.status} | On-chain: ${onChainTx.slice(0, 12)}...`);
         setRecords(prev => prev.filter(r => r.maintenance_id !== id));
       }
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
+      txStateMachine.setError(TxState.RPC_ERROR, message);
       setError(message);
     } finally {
       setProcessingId(null);
@@ -83,9 +112,15 @@ export default function ApprovalCenter() {
         throw new Error('Contract ID not configured (NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID) — on-chain rejection required');
       }
 
+      txStateMachine.reset();
+      txStateMachine.transition(TxState.SIMULATING);
+
       // BLOCKCHAIN-FIRST: Reject on-chain via Soroban BEFORE backend/DB write.
       if (isConnected && address) {
         const idBytes32 = toBytesN32(id);
+
+        txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
+
         const txResult = await callContract(
           MULTI_PARTY_APPROVAL_ID,
           'reject_by_supervisor',
@@ -93,16 +128,22 @@ export default function ApprovalCenter() {
         );
         const onChainTx = txResult.transactionHash;
 
+        txStateMachine.transition(TxState.CONFIRMED, { hash: onChainTx });
+
         // On-chain succeeded — now record in backend (DB mirror)
+        txStateMachine.transition(TxState.DATABASE_SYNC);
+
         const result = await api.supervisorReject(id, {
           decision_note: 'Rejected: requires additional evidence',
         });
 
+        txStateMachine.transition(TxState.COMPLETE, { hash: onChainTx });
         setTxHash(`Record ${id} → Status: ${result.status} | On-chain: ${onChainTx.slice(0, 12)}...`);
         setRecords(prev => prev.filter(r => r.maintenance_id !== id));
       }
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
+      txStateMachine.setError(TxState.RPC_ERROR, message);
       setError(message);
     } finally {
       setProcessingId(null);
@@ -123,6 +164,16 @@ export default function ApprovalCenter() {
 
       {isConnected && (
         <div className="space-y-4">
+          {/* Transaction progress indicator */}
+          {txStateMachine.state !== TxState.IDLE && (
+            <TransactionProgress
+              stateMachine={txStateMachine}
+              explorerUrl="https://stellar.expert/explorer/testnet"
+              onRetry={txStateMachine.retry}
+              onDismiss={txStateMachine.reset}
+            />
+          )}
+
           {(error || txHash) && (
             <div
               className="glass px-4 py-3 text-sm motion-safe:animate-[fadeSlideUp_0.3s_ease-out]"

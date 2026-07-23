@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, BytesN, Env};
 
 #[contracttype]
 #[derive(Clone)]
@@ -52,8 +52,6 @@ impl MultiPartyApproval {
         });
 
         // Simulating check for "APPROVED" via first byte.
-        // `Bytes` in this SDK version doesn't support direct indexing via `as_ref()[0]`.
-        // `BytesN` in this SDK version supports `as_ref()`.
         let first_opt = decision.as_ref().get(0);
         let first = match first_opt {
             Some(v) => v,
@@ -62,10 +60,13 @@ impl MultiPartyApproval {
 
         state.supervisor_approved = first == 1;
 
-
-
-
         env.storage().instance().set(&maintenance_id, &state);
+
+        // Emit approval event
+        env.events().publish((
+            symbol_short!("approve"),
+            maintenance_id.clone(),
+        ), first == 1);
     }
 
     /// Supervisor rejection.
@@ -79,6 +80,12 @@ impl MultiPartyApproval {
 
         state.supervisor_approved = false;
         env.storage().instance().set(&maintenance_id, &state);
+
+        // Emit rejection event
+        env.events().publish((
+            symbol_short!("reject"),
+            maintenance_id.clone(),
+        ), false);
     }
 
     /// Auditor approval.
@@ -92,6 +99,12 @@ impl MultiPartyApproval {
 
         state.auditor_approved = true;
         env.storage().instance().set(&maintenance_id, &state);
+
+        // Emit auditor approval event
+        env.events().publish((
+            symbol_short!("audit"),
+            maintenance_id.clone(),
+        ), true);
     }
 
     /// Compliance verification.

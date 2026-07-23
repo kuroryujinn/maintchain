@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
 
 #[contracttype]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -53,10 +53,16 @@ impl MaintenanceRecords {
     pub fn submit_evidence(env: Env, maintenance_id: BytesN<32>, evidence_hash: BytesN<32>) {
         let mut order: MaintenanceOrder = env.storage().instance().get(&maintenance_id).expect("Maintenance record not found");
 
-        order.evidence_hash = Some(evidence_hash);
+        order.evidence_hash = Some(evidence_hash.clone());
         order.status = MaintenanceStatus::Submitted;
 
         env.storage().instance().set(&maintenance_id, &order);
+
+        // Emit evidence submission event
+        env.events().publish((
+            symbol_short!("evidence"),
+            maintenance_id.clone(),
+        ), evidence_hash);
     }
 
     /// Updates the status of a maintenance record.
@@ -67,6 +73,12 @@ impl MaintenanceRecords {
         order.status = new_status;
 
         env.storage().instance().set(&maintenance_id, &order);
+
+        // Emit status change event
+        env.events().publish((
+            symbol_short!("status"),
+            maintenance_id.clone(),
+        ), new_status as u32);
     }
 
     /// Complete a maintenance record (transition to Compliant).
@@ -79,6 +91,12 @@ impl MaintenanceRecords {
 
         order.status = MaintenanceStatus::Compliant;
         env.storage().instance().set(&maintenance_id, &order);
+
+        // Emit completion event
+        env.events().publish((
+            symbol_short!("complete"),
+            maintenance_id,
+        ), MaintenanceStatus::Compliant as u32);
     }
 
     /// Get maintenance record details.

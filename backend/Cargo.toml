@@ -31,6 +31,13 @@ stellar-rpc-client = { version = "21" }
 # IPFS / Pinata integration
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 
+# Challenge-response auth dependencies
+ed25519-dalek = "2.2"
+stellar-strkey = "0.0.8"
+base64 = "0.22"
+hmac = "0.12"
+rand = "0.8"
+
 # Monitoring & error tracking (Sentry)
 sentry = "0.48"
 sentry-tower = "0.48"

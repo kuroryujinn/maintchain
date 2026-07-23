@@ -20,6 +20,8 @@ mod storage;
 #[allow(dead_code)]
 mod seed;
 use audit::{approve_by_auditor, get_audit_trail};
+mod auth;
+mod tx_log;
 
 use tower_http::cors::{Any, CorsLayer};
 
@@ -864,6 +866,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/users", get(list_users).post(register_user))
         .route("/users/count", get(user_count))
         .route("/users/:stellar_address", get(get_user_by_stellar))
+
+        // Auth routes
+        .route("/api/auth/challenge", post(crate::auth::create_challenge))
+        .route("/api/auth/verify", post(crate::auth::verify_challenge))
+
+        // Transaction log routes
+        .route("/api/tx-log", get(crate::tx_log::list_tx_log).post(crate::tx_log::post_tx_log))
 
         // Sentry middleware — captures performance data and errors for all requests
         .layer(NewSentryLayer::new_from_top())

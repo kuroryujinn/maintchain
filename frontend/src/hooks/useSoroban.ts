@@ -207,6 +207,9 @@ export const useSoroban = () => {
 
       await validateNetwork();
       await refreshBalance(authAddress);
+
+      // After wallet connection succeeds, verify ownership
+      await verifyWalletOwnership(authAddress);
     } catch (e: any) {
       setWalletError({
         message: e?.message ? String(e.message) : 'Freighter connection failed.',
@@ -341,6 +344,106 @@ export const useSoroban = () => {
     [address],
   );
 
+  // ── Challenge-response wallet ownership verification ──
+
+  const AUTH_API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081';
+
+  const [verifiedWallet, setVerifiedWallet] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+
+  /**
+   * Verify wallet ownership via challenge-response.
+   * After Freighter grants access, this proves the user holds the private key.
+   */
+  const verifyWalletOwnership = useCallback(async (walletAddress: string): Promise<boolean> => {
+    try {
+      setVerifiedWallet(false);
+      setVerificationError(null);
+
+      // 1. Request nonce from backend
+      const challengeRes = await fetch(`${AUTH_API_BASE}/api/auth/challenge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stellar_address: walletAddress }),
+      });
+
+      if (!challengeRes.ok) {
+        throw new Error(`Challenge request failed: ${challengeRes.statusText}`);
+      }
+
+      const { nonce, message } = await challengeRes.json();
+
+      // 2. Sign the nonce message with Freighter
+      // Create a minimal transaction that carries the nonce as its memo
+      // This is a standard Stellar approach — the nonce in the memo field
+      // proves the signer controls the account.
+      const { TransactionBuilder, Operation, Networks, BASE_FEE, Memo, Asset } =
+        await import('@stellar/stellar-sdk');
+
+      const server = new (await import('@stellar/stellar-sdk')).Horizon.Server(
+        process.env.NEXT_PUBLIC_HORIZON_URL || 'https://horizon-testnet.stellar.org'
+      );
+
+      const sourceAccount = await server.loadAccount(walletAddress);
+
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(Operation.payment({
+          destination: walletAddress, // Pay ourselves (min XLM)
+          asset: Asset.native(),
+          amount: '0.0000001',
+        }))
+        .addMemo(Memo.text(message.slice(0, 28))) // Memo max 28 bytes
+        .setTimeout(30)
+        .build();
+
+      const txXDR = tx.toXDR();
+
+      const signed = await freighterSignTransaction(txXDR, {
+        networkPassphrase: Networks.TESTNET,
+        address: walletAddress,
+      });
+
+      if (signed.error) throw new Error(`Signing error: ${signed.error.message}`);
+      if (!signed.signedTxXdr) throw new Error('No signed XDR returned');
+
+      // 3. Send signed transaction XDR to backend for verification
+      const verifyRes = await fetch(`${AUTH_API_BASE}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stellar_address: walletAddress,
+          nonce: message,
+          signature: signed.signedTxXdr,
+        }),
+      });
+
+      if (!verifyRes.ok) {
+        const errBody = await verifyRes.text().catch(() => '');
+        throw new Error(`Verification failed: ${errBody}`);
+      }
+
+      const { verified, token } = await verifyRes.json();
+
+      if (!verified) {
+        throw new Error('Wallet ownership not verified');
+      }
+
+      // 4. Store session token
+      localStorage.setItem('maintchain:auth:token', token);
+      setVerifiedWallet(true);
+      return true;
+
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setVerificationError(msg);
+      setVerifiedWallet(false);
+      return false;
+    }
+  }, [AUTH_API_BASE]);
+
   return {
     freighterInstalled,
     isConnected,
@@ -363,5 +466,9 @@ export const useSoroban = () => {
     sendError,
 
     callContract,
+
+    verifiedWallet,
+    verificationError,
+    verifyWalletOwnership,
   };
 };

@@ -24,6 +24,33 @@
 import { Keypair, Contract, TransactionBuilder, Networks, BASE_FEE,
   SorobanDataBuilder, xdr, nativeToScVal, Memo } from '@stellar/stellar-sdk';
 
+/**
+ * Fetch with retry — only for retryable errors (network, 5xx).
+ * Does NOT retry on 4xx, simulation errors, or contract failures.
+ */
+async function fetchWithRetry(url, options, maxRetries = 2) {
+  const RETRYABLE_STATUSES = [408, 429, 500, 502, 503, 504];
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok || !RETRYABLE_STATUSES.includes(res.status)) {
+        return res;
+      }
+      // Status is retryable — throw to trigger retry
+      throw new Error(`Retryable status ${res.status}`);
+    } catch (e) {
+      if (attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
+        console.error(`  Retry ${attempt + 1}/${maxRetries} after ${delay}ms: ${e.message}`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw e; // No more retries
+      }
+    }
+  }
+}
+
 function hexToScVal(hex) {
   const clean = hex.replace('0x', '').padStart(64, '0');
   const bytes = Buffer.from(clean, 'hex');
@@ -37,7 +64,7 @@ async function main() {
   input = Buffer.concat(chunks).toString('utf8');
   
   const config = JSON.parse(input);
-  const { rpc_url, network_passphrase, contract_id, method, args, secret_key, simulate_only } = config;
+  const { rpc_url, network_passphrase, contract_id, method, args, secret_key, simulate_only, idempotency_key } = config;
 
   if (!simulate_only && !secret_key) {
     console.log(JSON.stringify({ success: false, error: 'secret_key is required for non-simulate calls' }));
@@ -50,7 +77,7 @@ async function main() {
   try {
     const contract = new Contract(contract_id);
     const scvalArgs = (args || []).map(a => {
-      if (a.startsWith('0x')) return hexToScVal(a);
+      if (typeof a === 'string' && a.startsWith('0x')) return hexToScVal(a);
       if (typeof a === 'string' && a.startsWith('C')) {
         // Contract address as ScVal address
         return nativeToScVal(a);
@@ -61,7 +88,7 @@ async function main() {
     const op = contract.call(method, ...scvalArgs);
 
     if (simulate_only) {
-      // Build a minimal tx for simulation (no real source account needed)
+      // Build a minimal tx for simulation
       const tx = new TransactionBuilder(
         { sequence: '0', accountId: () => '' },
         { fee: BASE_FEE, networkPassphrase: passphrase }
@@ -71,7 +98,7 @@ async function main() {
         .setTimeout(30)
         .build();
 
-      const simRes = await fetch(`${rpcUrl}/simulateTransaction`, {
+      const simRes = await fetchWithRetry(`${rpcUrl}/simulateTransaction`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction: tx.toXDR() }),
@@ -99,7 +126,7 @@ async function main() {
     const address = kp.publicKey();
 
     // Get account sequence
-    const accountRes = await fetch(`${rpcUrl}/accounts/${encodeURIComponent(address)}`);
+    const accountRes = await fetchWithRetry(`${rpcUrl}/accounts/${encodeURIComponent(address)}`);
     if (!accountRes.ok) throw new Error(`Failed to get account: ${accountRes.statusText}`);
     const { sequence } = await accountRes.json();
 
@@ -113,7 +140,7 @@ async function main() {
       .build();
 
     // Simulate
-    const simRes = await fetch(`${rpcUrl}/simulateTransaction`, {
+    const simRes = await fetchWithRetry(`${rpcUrl}/simulateTransaction`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transaction: tx.toXDR() }),
@@ -144,23 +171,31 @@ async function main() {
     txEnvelope.sign(kp);
     const signedXDR = txEnvelope.toXDR('base64');
 
-    // Submit
-    const sendRes = await fetch(`${rpcUrl}/sendTransaction`, {
+    // Compute tx hash for idempotency
+    const txHash = txEnvelope.hash().toString('hex');
+
+    // Submit with retry and idempotency key
+    const sendBody = { transaction: signedXDR };
+    if (idempotency_key || txHash) {
+      sendBody.idempotency_key = idempotency_key || txHash;
+    }
+
+    const sendRes = await fetchWithRetry(`${rpcUrl}/sendTransaction`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transaction: signedXDR }),
+      body: JSON.stringify(sendBody),
     });
 
     if (!sendRes.ok) throw new Error(`Submit failed: ${sendRes.statusText}`);
     const sendResult = await sendRes.json();
-    const txHash = sendResult.hash || 'unknown';
+    const txHashStr = sendResult.hash || txHash || 'unknown';
     let txStatus = sendResult.status;
 
-    // Poll
+    // Poll with retry
     if (txStatus === 'PENDING') {
       for (let i = 0; i < 15; i++) {
         await new Promise(r => setTimeout(r, 1000));
-        const pollRes = await fetch(`${rpcUrl}/getTransaction/${encodeURIComponent(txHash)}`);
+        const pollRes = await fetchWithRetry(`${rpcUrl}/getTransaction/${encodeURIComponent(txHashStr)}`);
         if (pollRes.ok) {
           const pollResult = await pollRes.json();
           txStatus = pollResult.status;
@@ -170,9 +205,9 @@ async function main() {
     }
 
     if (txStatus === 'SUCCESS') {
-      console.log(JSON.stringify({ success: true, tx_hash: txHash, status: 'SUCCESS' }));
+      console.log(JSON.stringify({ success: true, tx_hash: txHashStr, status: 'SUCCESS' }));
     } else {
-      console.log(JSON.stringify({ success: false, error: `Transaction ${txHash} ended with status: ${txStatus}`, tx_hash: txHash }));
+      console.log(JSON.stringify({ success: false, error: `Transaction ${txHashStr} ended with status: ${txStatus}`, tx_hash: txHashStr }));
     }
 
   } catch (e) {

@@ -6,6 +6,9 @@ import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
 import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
 import { toBytesN32 } from '@/lib/soroban';
+import { useTransactionState, TxState, FAILURE_STATES } from '@/hooks/useTransactionState';
+import { TransactionProgress, TransactionSteps } from '@/components/maintchain/TransactionProgress';
+import { addTxLogEvent } from '@/lib/transaction-logger';
 
 const MAINTENANCE_RECORDS_ID = process.env.NEXT_PUBLIC_MAINTENANCE_RECORDS_ID || '';
 
@@ -17,6 +20,20 @@ export default function EvidenceUpload() {
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  const txStateMachine = useTransactionState({
+    onStateChange: (newState) => {
+      if (newState === TxState.COMPLETE || FAILURE_STATES.has(newState)) {
+        addTxLogEvent({
+          walletAddress: address || '',
+          contractId: MAINTENANCE_RECORDS_ID,
+          method: 'submit_evidence',
+          state: newState,
+          transactionHash: txStateMachine.transactionHash || undefined,
+        });
+      }
+    },
+  });
+
   const handleUpload = async () => {
     if (!file || !maintenanceId) return;
     setUploading(true);
@@ -24,33 +41,48 @@ export default function EvidenceUpload() {
     setUploadError(null);
 
     try {
+      txStateMachine.reset();
+
       // 1. Compute hash via the backend's hash utility
+      txStateMachine.transition(TxState.PREPARING);
+
       const hash = await api.computeHash({
         payload: `${file.name}-${Date.now()}-${file.size}`,
       });
 
       // 2. Submit evidence hash on-chain via Soroban FIRST (blockchain-first)
-      //    This MUST succeed before any backend/DB write.
+      txStateMachine.transition(TxState.SIMULATING);
+
       let onChainTx: string | null = null;
       if (isConnected && MAINTENANCE_RECORDS_ID && address) {
         const idBytes32 = toBytesN32(maintenanceId);
+
+        txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
+
         const txResult = await callContract(
           MAINTENANCE_RECORDS_ID,
           'submit_evidence',
           [idBytes32, hash.evidence_hash]
         );
+
+        txStateMachine.transition(TxState.CONFIRMED, { hash: txResult.transactionHash });
         onChainTx = txResult.transactionHash;
       }
 
       // 3. On-chain succeeded — now submit evidence hash to backend (DB mirror)
+      txStateMachine.transition(TxState.DATABASE_SYNC);
+
       const result = await api.submitEvidence(maintenanceId, {
         evidence_hash: hash.evidence_hash,
       });
+
+      txStateMachine.transition(TxState.COMPLETE, { hash: txStateMachine.transactionHash || '' });
 
       const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
       setUploadResult(`Evidence submitted! Status: ${result.status}${txInfo}`);
     } catch (error) {
       const message = error instanceof ApiError ? `${error.code}: ${error.message}` : 'Upload failed';
+      txStateMachine.setError(TxState.RPC_ERROR, message);
       setUploadError(message);
     } finally {
       setUploading(false);
@@ -150,6 +182,19 @@ export default function EvidenceUpload() {
               )}
             </button>
           </div>
+
+          {/* Transaction progress */}
+          {(txStateMachine.state !== TxState.IDLE && txStateMachine.state !== TxState.COMPLETE) && (
+            <div className="mt-6 space-y-2">
+              <TransactionSteps currentState={txStateMachine.state} />
+              <TransactionProgress
+                stateMachine={txStateMachine}
+                explorerUrl="https://stellar.expert/explorer/testnet"
+                onRetry={txStateMachine.retry}
+                onDismiss={txStateMachine.reset}
+              />
+            </div>
+          )}
 
           {uploadResult && (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 motion-safe:animate-[fadeSlideUp_0.3s_ease-out]">

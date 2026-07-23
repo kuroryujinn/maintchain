@@ -31,6 +31,9 @@ import {
   User,
 } from 'lucide-react';
 import { toBytesN32 } from '@/lib/soroban';
+import { useTransactionState, TxState, FAILURE_STATES } from '@/hooks/useTransactionState';
+import { TransactionProgress } from '@/components/maintchain/TransactionProgress';
+import { addTxLogEvent } from '@/lib/transaction-logger';
 
 const COMPLIANCE_ATTESTATION_ID = process.env.NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID || '';
 const MULTI_PARTY_APPROVAL_ID = process.env.NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID || '';
@@ -74,6 +77,20 @@ export default function AuditTimeline() {
   const [auditData, setAuditData] = useState<AuditResponse | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [certifying, setCertifying] = useState(false);
+
+  const txStateMachine = useTransactionState({
+    onStateChange: (newState) => {
+      if (newState === TxState.COMPLETE || FAILURE_STATES.has(newState)) {
+        addTxLogEvent({
+          walletAddress: address || '',
+          contractId: COMPLIANCE_ATTESTATION_ID,
+          method: 'issue_certificate',
+          state: newState,
+          transactionHash: txStateMachine.transactionHash || undefined,
+        });
+      }
+    },
+  });
 
   // Certification dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -135,13 +152,13 @@ export default function AuditTimeline() {
 
   const handleCertify = async () => {
     if (!validateForm()) return;
-
     setCertifying(true);
     setTxHash(null);
     setError(null);
     setDialogOpen(false);
 
     const maintenanceId = 'REC-DE-4471';
+    txStateMachine.reset();
 
     try {
       // Build structured certification note from form data
@@ -172,11 +189,16 @@ export default function AuditTimeline() {
         throw new Error('One or more contract IDs not configured (check NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID, MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID)');
       }
 
+      txStateMachine.transition(TxState.PREPARING);
+
       // BLOCKCHAIN-FIRST: Issue certificate on-chain via Soroban BEFORE backend/DB write.
       if (isConnected && address) {
         const certHash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
           .map(b => b.toString(16).padStart(2, '0')).join('');
         const idBytes32 = toBytesN32(maintenanceId);
+
+        txStateMachine.transition(TxState.SIMULATING);
+
         const txResult = await callContract(
           COMPLIANCE_ATTESTATION_ID,
           'issue_certificate',
@@ -184,10 +206,15 @@ export default function AuditTimeline() {
         );
         const onChainTx = txResult.transactionHash;
 
+        txStateMachine.transition(TxState.CONFIRMED, { hash: onChainTx });
+
         // On-chain succeeded — now record auditor approval in backend (DB mirror)
+        txStateMachine.transition(TxState.DATABASE_SYNC);
         const result = await api.auditorApprove(maintenanceId, {
           decision_note: decisionNote,
         });
+
+        txStateMachine.transition(TxState.COMPLETE, { hash: onChainTx });
 
         setTxHash(`Certificate issued → Status: ${result.status} | On-chain tx: ${onChainTx.slice(0, 12)}...`);
         resetForm();
@@ -195,6 +222,7 @@ export default function AuditTimeline() {
       }
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
+      txStateMachine.setError(TxState.RPC_ERROR, message);
       setError(message);
     } finally {
       setCertifying(false);
@@ -248,6 +276,18 @@ export default function AuditTimeline() {
                       {txHash ? 'On-chain certification confirmed' : 'On-chain certification failed'}
                     </div>
                     <div className="mt-1 font-mono text-xs whitespace-pre-wrap">{txHash ?? error}</div>
+                  </div>
+                )}
+
+                {/* Transaction progress */}
+                {txStateMachine.state !== TxState.IDLE && (
+                  <div className="mt-4">
+                    <TransactionProgress
+                      stateMachine={txStateMachine}
+                      explorerUrl="https://stellar.expert/explorer/testnet"
+                      onRetry={txStateMachine.retry}
+                      onDismiss={txStateMachine.reset}
+                    />
                   </div>
                 )}
 

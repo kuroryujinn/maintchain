@@ -23,7 +23,6 @@ impl ComplianceAttestation {
         cert_hash: BytesN<32>,
     ) -> BytesN<32> {
         // 1. Call MultiPartyApproval.verify_compliance to check eligibility.
-        // Symbol "verify" (6 chars) matches the exported symbol from multi-party-approval.
         let args: soroban_sdk::Vec<Val> = vec![&env, maintenance_id.clone().into_val(&env)];
         let is_eligible: bool = env.invoke_contract(
             &approval_contract_id,
@@ -44,13 +43,18 @@ impl ComplianceAttestation {
         env.storage().instance().set(&maintenance_id, &attestation);
 
         // 3. Update MaintenanceRecords status to Compliant via cross-contract call.
-        // Symbol "complete" (8 chars) matches the exported symbol from maintenance-records.
         let complete_args: soroban_sdk::Vec<Val> = vec![&env, maintenance_id.into_val(&env)];
         env.invoke_contract::<()>(
             &records_contract_id,
             &symbol_short!("complete"),
             complete_args,
         );
+
+        // 4. Emit certification event
+        env.events().publish((
+            symbol_short!("certify"),
+            maintenance_id.clone(),
+        ), cert_hash.clone());
 
         cert_hash
     }
