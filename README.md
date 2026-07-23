@@ -1,128 +1,107 @@
-# MaintChain — A Verifiable Trust Network for Industrial Maintenance
+# MaintChain
 
-> **Thesis:** MaintChain makes industrial maintenance records provably tamper-proof by enforcing a multi-party cryptographic approval workflow on Stellar Soroban smart contracts — technician submits evidence, supervisor verifies, auditor certifies — with every approval permanently recorded on-chain and no single party able to rewrite history.
+> A multi-party compliance platform for industrial maintenance records, powered by Stellar Soroban smart contracts. Every repair becomes a permanent, verifiable record that survives audits because it was never possible to falsify.
 
-**Supporting documents:**
-- [📘 Project Guide & Use Cases](./PROJECT_GUIDE.md) — Whitepaper: problem analysis, stakeholder model, industry scenarios, market sizing
-- [🏗️ System Architecture & Design](./SYSTEM_DESIGN.md) — Architecture decisions, component deep-dives, security model, trade-off analysis
-- [🔗 Stellar SDK & Contract Integration](./STELLAR_INTEGRATION.md) — Soroban contract internals, SDK usage, deployment pipeline, known limitations
+**Related documents:**
+- [📘 Project Guide & Use Cases](./PROJECT_GUIDE.md) — Whitepaper-style narrative covering problem, solution, stakeholder analysis, and industry scenarios
+- [🏗️ System Architecture & Design](./SYSTEM_DESIGN.md) — Full system design with data flow diagrams, security model, and trade-off analysis
+- [📐 Architecture Diagram (Interactive)](./SYSTEM_DESIGN_DIAGRAM.html) — Visual HTML system architecture diagram (open in browser)
+- [🔗 Stellar SDK & Contract Integration](./STELLAR_INTEGRATION.md) — Deep-dive on Soroban contracts, Stellar SDK usage, and deployment pipeline
 
 ---
 
 ## Abstract
 
-Industrial maintenance records — repair logs, inspection reports, compliance certificates — form the backbone of safety and regulatory compliance across aviation, energy, manufacturing, and maritime sectors. Yet these records remain fundamentally **mutable**: paper logs can be altered, central databases can be modified by administrators, and single-party approvals create single points of failure. The consequence is an estimated **$10B+ annually** in fraud-related costs across these sectors.
-
-MaintChain closes this gap through a **multi-party cryptographic approval workflow** executed on Stellar Soroban smart contracts. The system enforces that a maintenance record is only considered compliant after three independent roles — technician, supervisor, and optionally auditor — have each signed off on-chain. Evidence files remain off-chain; only SHA-256 hashes are stored on-chain for proof-of-existence. The full stack includes four Soroban smart contracts (Rust, `no_std`), an Axum REST backend (Rust, PostgreSQL), a Next.js 14 frontend with Freighter wallet integration, and automated contract deployment and integration-test scripts.
-
-The system is deployed on Stellar Testnet with all four contracts verified, a production-grade frontend on Vercel, and a containerized backend on Render.
+MaintChain prevents falsification of industrial maintenance records by enforcing a **multi-party approval workflow on-chain**. A maintenance record is only considered compliant after independent roles (technician, supervisor, optionally auditor) have recorded their approvals via Soroban smart contracts on Stellar Testnet. Evidence files remain off-chain; only cryptographic hashes are stored on-chain. The project ships a full stack: four Soroban contracts (Rust, `no_std`), an Axum REST backend (Rust, Postgres), a Next.js frontend with Freighter wallet integration, and automated contract deployment scripts.
 
 ---
 
 ## Problem
 
-### The Scale of Record Fraud
+Industrial maintenance records today are:
+- **Mutable** — paper logs and spreadsheets can be altered after the fact.
+- **Single-party** — one person's approval is rarely audited by independent roles.
+- **Isolated** — a technician's reputation does not travel with them across employers or regions.
+- **Expensive to audit** — verifying a repair history requires chasing down siloed records.
 
-| Sector | Annual Fraud Cost | Key Risk |
-|--------|------------------|----------|
-| Aerospace | $4.2B (parts counterfeiting) | Safety-critical failures |
-| Oil & Gas | $2.8B (compliance falsification) | Environmental disasters |
-| Manufacturing | $1.9B (warranty fraud) | Liability exposure |
-| Maritime | $1.1B (certificate forgery) | Port detention |
+The gap is not technical capability but *incentive compatibility*: no existing system chains approvals together in a way that makes falsification provably expensive and honest work provably cheap to verify.
 
-*Source: Industry estimates aggregated 2024–2025.*
-
-### Why Current Systems Fail
-
-**Paper-based logs** can be physically altered, lost, or destroyed with no forensic trace. **Centralized databases** are controlled by a single organization; any operator or administrator with database access can modify records, and audit logs can be truncated. **Single-party approval workflows** mean that one compromised credential can falsify an entire inspection record. **Siloed reputation** prevents a technician's work history from traveling across employers — a skilled welder with a flawless record at one plant starts from zero credibility at the next.
-
-The fundamental gap is **incentive incompatibility**: no existing system chains approvals together in a way that makes falsification provably expensive and honest work provably cheap to verify.
-
-### The Cost of Verification
-
-Without on-chain attestations, verifying a maintenance history requires:
-1. Requesting records from the equipment owner (days turnaround)
-2. Cross-referencing against parts suppliers and repair logs (hours of manual work)
-3. Trusting that the provided records have not been altered (no cryptographic proof)
-
-With MaintChain, verification takes **under 30 seconds**: query the on-chain approval bitmap, check the evidence hash, and read the certificate attestation — no API keys, no data access requests, no trust required.
+For a detailed breakdown of the problem, industry impact, and use-case scenarios, see [PROJECT_GUIDE.md](./PROJECT_GUIDE.md#2-the-problem-industrial-maintenance-record-tampering).
 
 ---
 
 ## Approach
 
-### Architecture: Dual-Path On-Chain / Off-Chain
+### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Browser (Next.js 14)                         │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  useSoroban() Hook ────── Soroban RPC ──── Stellar Testnet   │  │
-│  │  api.ts REST Client ───── HTTP :8081 ───── Backend (Axum)    │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-│                                                                     │
-│  Dual independent paths:                                            │
-│  • On-chain: Freighter → Soroban RPC → contracts (approvals,       │
-│    evidence hashes, certificates)                                   │
-│  • Off-chain: fetch API → Axum → PostgreSQL (profiles, metadata,    │
-│    audit trail supplements, user management)                        │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Browser (Next.js 14 + React 18 + Tailwind v4)              │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  Freighter wallet injection (window.freighter)        │  │
+│  │  InvokeContract / SimulateContract helpers            │  │
+│  │  REST API client (fetch → backend :8081)              │  │
+│  └────────┬──────────────────────────────────┬───────────┘  │
+│           │ Freighter                        │ fetch        │
+│           ▼                                  ▼              │
+│  ┌──────────────────────┐    ┌────────────────────────────┐ │
+│  │ Stellar Testnet      │    │ Backend (Axum + Postgres)  │ │
+│  │ - Soroban contracts  │    │ - Equipment CRUD           │ │
+│  │ - Horizon balance    │    │ - Maintenance orders       │ │
+│  │ - Signed txs         │    │ - Supervisor approvals     │ │
+│  └──────────────────────┘    │ - Audit trail             │ │
+│                              │ - SHA-256 hashing         │ │
+│                              └────────────────────────────┘ │
+│                                                             │
+│  The two paths are independent: the frontend calls Soroban  │
+│  RPC directly via Freighter for on-chain operations, and    │
+│  calls the backend REST API for off-chain CRUD workflows.  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-The architecture follows a **dual-path pattern** with a clear on-chain/off-chain boundary:
+> **Interactive architecture diagram:** Open [`SYSTEM_DESIGN_DIAGRAM.html`](./SYSTEM_DESIGN_DIAGRAM.html) in a browser for a visual, layer-by-layer breakdown of the entire system — including deployment infrastructure, compliance flow, and module details.
 
-| Concern | Location | Rationale |
-|---------|----------|-----------|
-| Approval state (tech/supervisor/auditor) | On-chain (MultiPartyApproval) | Immutable — no single party rewrites history |
-| Evidence hashes | On-chain (MaintenanceRecords) | Proof-of-existence without storing files on-chain |
-| Equipment ownership chain | On-chain (EquipmentRegistry) | Verifiable chain of custody across transfers |
-| Compliance certificates | On-chain (ComplianceAttestation) | Permanently verifiable by any party |
-| Evidence files (photos, PDFs) | Off-chain (IPFS / backend) | Cost-prohibitive on-chain |
-| Worker profiles, reviews | Off-chain (PostgreSQL) | High churn, not safety-critical |
-| Machine metadata | Off-chain (PostgreSQL) | Frequently updated, searchable |
-| Audit trail logs | Off-chain (PostgreSQL) | Supplementary to on-chain approvals |
-| Transaction lifecycle events | Off-chain (PostgreSQL, tx_log table) | RPC latency monitoring, retry tracking |
+---
+
+![Live Webpage][img:Live_webpage.png]
+
+
+![Mobile Responsive](Mobile-responsive.png)
+
 
 ### Smart Contracts (4 crates)
 
-Each contract is an independent Soroban crate compiled to WASM (`wasm32v1-none`). All contracts emit Soroban events for transaction lifecycle tracking.
+Each contract is an independent Soroban crate compiled to WASM (`wasm32v1-none`):
 
-**EquipmentRegistry** — Registers equipment with versioned snapshot history. Each ownership transfer creates a new snapshot with a self-certifying hash: `SHA256("EQUP" || id || metadata_hash || created_at || version)`. Enables unbroken chain of custody without centralized registry.
+1. **EquipmentRegistry** — Registers equipment with an owner, metadata hash, and **versioned snapshot history**. Ownership transfers create new versioned snapshots with distinct hashes. Each snapshot is self-certifying: the equipment hash is `SHA256(SEP || equipment_id || metadata_hash || created_at || version)`.
 
-**MaintenanceRecords** — State machine for individual maintenance jobs: `Open → Submitted → PendingApproval → Compliant → Rejected`. Evidence hashes are attached at submission. Exposes `update_status` for cross-contract calls from the approval engine. Emits `evidence`, `status`, and `complete` events.
+2. **MaintenanceRecords** — Stores maintenance orders with status enum (`Open → Submitted → PendingApproval → Compliant → Rejected`). Evidence hashes are attached at submission time. The contract exposes an `update_status` function intended to be callable by the approval engine.
 
-**MultiPartyApproval** — The enforcement point. Tracks a per-record approval bitmap across three roles (technician, supervisor, auditor) with configurable auditor requirement. `verify_compliance` returns `true` only when all required approvals are satisfied. Emits `approve`, `reject`, and `audit` events.
+3. **MultiPartyApproval** — Tracks approval state per maintenance ID across three roles: technician, supervisor, and optionally auditor. `verify_compliance` returns true only when all required approvals are satisfied. This is the **enforcement point**: no off-chain logic can mark a record compliant without the on-chain approval bitmap.
 
-**ComplianceAttestation** — Issues final certificates via cross-contract calls. Verifies compliance by calling MultiPartyApproval, then transitions MaintenanceRecords to Compliant. Emits `certify` events. This is the terminal artifact of the compliance workflow.
+4. **ComplianceAttestation** — Issues a final certificate (attestation) containing the issuer address, cert hash, and timestamp. The `issue_certificate` function performs cross-contract calls to verify compliance before minting.
 
-### Transaction State Machine (Frontend)
+> For a detailed technical deep-dive on each contract — including data structures, function signatures, test coverage, and deployment addresses — see [STELLAR_INTEGRATION.md](./STELLAR_INTEGRATION.md#4-contract-deep-dives).
 
-Every on-chain operation (evidence submission, approval, certification) flows through a typed state machine with 16 states:
+### Compliance Flow (6 stages)
 
 ```
-Forward:    IDLE → PREPARING → SIMULATING → WAITING_FOR_SIGNATURE
-            → SUBMITTING → PENDING → CONFIRMED → DATABASE_SYNC → COMPLETE
-
-Failure:    SIMULATION_FAILED, SIGNATURE_REJECTED, RPC_ERROR,
-            INSUFFICIENT_BALANCE, CONTRACT_REVERT, TIMEOUT,
-            DATABASE_SYNC_FAILED
+Fault Detected → Worker Accepts → Evidence Uploaded
+  → Evidence Verified → Approval Chain → Certificate Generated
 ```
 
-Retryable failures (RPC errors, timeouts, DB sync failures) support exponential-backoff retry with configurable max attempts (default: 3). Non-retryable failures (signature rejection, insufficient balance, contract revert) terminate immediately. A visual `TransactionProgress` component with a 7-step progress indicator gives users real-time feedback.
+Detailed per-stage data (asset, urgency, trust score, evidence media, part traceability) is defined in `frontend/src/data/maintchain.ts` as `TrustReplayStage[]`.
 
-### Challenge-Response Wallet Authentication
+### Off-Chain / On-Chain Boundary
 
-Wallet ownership is verified via a challenge-response protocol:
-1. Frontend requests a random nonce from `POST /api/auth/challenge`
-2. Frontend signs the nonce message with Freighter (embedded in a minimal transaction memo)
-3. Backend verifies the ed25519 signature against the Stellar public key using `stellar-strkey`
-4. Backend returns an HMAC-SHA256 session token with 24-hour expiry
-
-Nonces are single-use with 5-minute TTL, stored in the `challenge_nonces` table.
-
-### Retry Strategy for RPC Calls
-
-The Node.js helper script (`scripts/soroban-invoke.mjs`) wraps all Soroban RPC fetches with `fetchWithRetry`: exponential backoff (1s, 2s, 4s; cap 8s), retryable on HTTP 408/429/5xx, idempotency keys for `sendTransaction` to prevent duplicate submissions on network retries.
+| Concern | Location | Rationale |
+|---------|----------|-----------|
+| Evidence files (photos, videos, PDFs) | Off-chain (IPFS / backend storage) | On-chain storage is prohibitively expensive for large files |
+| Evidence hashes | On-chain (MaintenanceRecords) | Enables proof-of-existence without storing the file |
+| Approval states | On-chain (MultiPartyApproval) | Immutable audit trail; no single party can rewrite history |
+| Certificate attestation | On-chain (ComplianceAttestation) | Publicly verifiable; survives operator shutdown |
+| Worker profiles, reviews, machine metadata | Off-chain (frontend data layer / Postgres) | High churn; not safety-critical; cached from API |
+| Audit trail (timestamped approval log) | Off-chain (Postgres) | Backend stores append-only approval log; on-chain mirror planned |
 
 ---
 
@@ -130,92 +109,81 @@ The Node.js helper script (`scripts/soroban-invoke.mjs`) wraps all Soroban RPC f
 
 ```
 .
-├── PROJECT_GUIDE.md               # Whitepaper — problem, use cases, stakeholders
-├── SYSTEM_DESIGN.md                # Architecture — component deep-dives, data flows
-├── STELLAR_INTEGRATION.md          # Stellar SDK — contract internals, deployment
-├── .github/workflows/              # CI/CD — GitHub Actions (ci.yml, deploy.yml)
+├── PROJECT_GUIDE.md                  # 📘 Whitepaper — use cases, stakeholders, market impact
+├── SYSTEM_DESIGN.md                  # 🏗️ Architecture — full system design with data flows
+├── SYSTEM_DESIGN_DIAGRAM.html        # 📐 Interactive architecture diagram (open in browser)
+├── STELLAR_INTEGRATION.md            # 🔗 Stellar SDK & contract deep-dive
 │
-├── backend/                        # Rust (Axum) REST API
-│   ├── Cargo.toml                  # Axum, sqlx, soroban-sdk, sentry, ed25519-dalek
+├── backend/                          # Rust (Axum) REST API
+│   ├── Cargo.toml                    # Dependencies: axum, sqlx, soroban-sdk, sha2
 │   ├── src/
-│   │   ├── main.rs                 # Router, handlers, CORS, DB pool, Sentry
-│   │   ├── auth.rs                 # POST /api/auth/challenge, /api/auth/verify
-│   │   ├── audit.rs                # GET /maintenance/:id/audit, auditor approval
-│   │   ├── complaint.rs            # Compliance transition logic
-│   │   ├── soroban_client.rs       # Soroban RPC wrapper, ed25519 verification
-│   │   ├── storage.rs              # File hashing + IPFS upload (Pinata)
-│   │   ├── tx_log.rs               # Transaction logging + POST/GET /api/tx-log
-│   │   ├── seed.rs                 # Database seeder
-│   │   └── seed_main.rs            # Binary entry point for seeding
+│   │   ├── main.rs                   # Router, handlers, CORS, DB pool
+│   │   ├── audit.rs                  # GET /maintenance/:id/audit, POST auditor approval
+│   │   ├── complaint.rs              # Compliance transition logic
+│   │   ├── soroban_client.rs         # Soroban RPC wrapper (demo mode)
+│   │   ├── storage.rs                # File hashing + IPFS upload
+│   │   ├── seed.rs                   # Database seeder
+│   │   └── seed_main.rs              # Binary entry point for seeding
 │   └── migrations/
-│       ├── 0001_init.sql           # Tables: equipment, maintenance_records, approvals
-│       ├── 0002_blockchain_integration.sql  # Contract address + tx_id columns
-│       └── 0005_transaction_log.sql         # Transaction log table + tx_status enum
-│       └── 0006_challenge_nonces.sql        # Challenge nonces for auth
+│       ├── 0001_init.sql             # Tables: equipment, maintenance_records, approvals
+│       └── 0002_blockchain_integration.sql  # Contract address + tx_id columns
 │
-├── contracts/                      # Soroban smart contracts (Rust, no_std)
-│   ├── Cargo.toml                  # Workspace with 4 members
-│   ├── equipment-registry/         # Versioned equipment snapshots + ownership
-│   ├── maintenance-records/        # Maintenance order state machine + events
-│   ├── multi-party-approval/       # Approval bitmap + compliance check + events
-│   └── compliance-attestation/     # Certificate issuance + cross-contract + events
+├── contracts/                        # Soroban smart contracts (Rust, no_std)
+│   ├── Cargo.toml                    # Workspace with 4 members
+│   ├── equipment-registry/           # Equipment registration + versioned snapshots
+│   ├── maintenance-records/          # Maintenance order state machine
+│   ├── multi-party-approval/         # Approval state bitmap (tech/supervisor/auditor)
+│   └── compliance-attestation/       # Certificate issuance + eligibility check
 │
-├── frontend/                       # Next.js 14 (App Router) + Tailwind v4
-│   ├── package.json                # next 14.2, react 18, stellar-sdk 13, freighter-api 6
+├── frontend/                         # Next.js 14 app (App Router)
+│   ├── package.json                  # deps: next 14.2, react 18, stellar-sdk 13, freighter-api 6
 │   ├── src/
-│   │   ├── app/                    # 18 route pages (App Router)
-│   │   │   ├── page.tsx            # Landing: Hero, TrustReplay, Stats, Comparison
-│   │   │   ├── dashboard/          # Worker dashboard with SVG metrics
-│   │   │   ├── upload/             # Evidence upload with transaction state machine
-│   │   │   ├── approve/            # Supervisor approval with state machine
-│   │   │   ├── audit/              # Audit timeline with certificate issuance
-│   │   │   ├── technician/         # Technician task list
-│   │   │   ├── workers/            # Worker discovery + profiles
-│   │   │   ├── machines/           # Machine passport directory
-│   │   │   ├── certificates/       # Certificate registry
-│   │   │   ├── live-network/       # Real-time activity feed
-│   │   │   ├── leaderboard/        # Global trust rankings
-│   │   │   ├── industries/         # Industry coverage
-│   │   │   ├── register/           # User registration with wallet connect
-│   │   │   ├── users/              # User directory with search/filter
-│   │   │   ├── feedback/           # Feedback with 5-star ratings
-│   │   │   └── docs, privacy, terms, contact/  # Coming soon
+│   │   ├── app/                      # Route pages (App Router)
+│   │   │   ├── page.tsx              # Landing page (Hero, TrustReplay, Stats, etc.)
+│   │   │   ├── dashboard/            # Worker dashboard with SVG metrics
+│   │   │   ├── upload/               # Evidence upload with drag-drop zone
+│   │   │   ├── approve/              # Supervisor approval center
+│   │   │   ├── audit/                # Audit timeline with visual connected timeline
+│   │   │   ├── technician/           # Technician task list
+│   │   │   ├── workers/              # Worker discovery + profiles
+│   │   │   ├── machines/             # Machine passport directory
+│   │   │   ├── certificates/         # Certificate registry
+│   │   │   ├── live-network/         # Real-time activity feed
+│   │   │   ├── leaderboard/          # Global trust rankings
+│   │   │   ├── industries/           # Industry coverage
+│   │   │   └── docs, privacy,
+│   │   │       terms, contact/       # Coming soon (Q3 2026)
 │   │   ├── components/
-│   │   │   ├── maintchain/         # Component library (30+ components)
-│   │   │   │   ├── ui.tsx          # EditorialSectionHeader, StatusBadge, ProfileCard
-│   │   │   │   ├── Nav.tsx         # Navigation with mobile slide-out
-│   │   │   │   ├── TransactionProgress.tsx  # Visual tx state machine + step indicator
-│   │   │   │   ├── FadeInView.tsx   # Scroll-triggered animation wrapper
-│   │   │   │   ├── TrustReplay.tsx  # 6-stage trust replay visualizer
-│   │   │   │   ├── FeedbackButton.tsx  # User feedback collection widget
-│   │   │   │   ├── SentryErrorBoundary.tsx  # Error boundary with Sentry
-│   │   │   │   └── landing/        # 12 landing page components
-│   │   │   ├── WalletConnectPanel.tsx    # Freighter connect + balance
-│   │   │   └── ui/                # shadcn/ui components (button, card, dialog, etc.)
+│   │   │   ├── maintchain/           # UI component library
+│   │   │   │   ├── ui.tsx            # EditorialSectionHeader, StatusBadge, ProfileCard, etc.
+│   │   │   │   ├── Nav.tsx           # Navigation with mobile slide-out
+│   │   │   │   ├── FadeInView.tsx    # Scroll-triggered animation wrapper
+│   │   │   │   ├── TrustReplay.tsx   # 6-stage trust replay visualizer
+│   │   │   │   ├── RouteShell.tsx    # Layout shell with masthead strip
+│   │   │   │   ├── FeedbackButton.tsx # User feedback collection widget
+│   │   │   │   ├── SentryErrorBoundary.tsx # Error boundary with Sentry reporting
+│   │   │   │   └── landing/          # 12 landing page components
+│   │   │   ├── WalletConnectPanel.tsx # Freighter connect/disconnect + balance
+│   │   │   └── Freighter.js          # Legacy Freighter integration
 │   │   ├── data/
-│   │   │   └── maintchain.ts       # Seed data: workers, machines, certificates
+│   │   │   └── maintchain.ts         # Seed data: workers, machines, certificates, leaderboard
 │   │   ├── hooks/
-│   │   │   ├── useSoroban.ts       # Freighter auth, balance, contract calls, challenge-response
-│   │   │   └── useTransactionState.ts  # 16-state tx lifecycle machine with retry
+│   │   │   └── useSoroban.ts         # React hook: Freighter auth, balance, network, contract calls
 │   │   └── lib/
-│   │       ├── api.ts              # Typed REST client for backend :8081
-│   │       ├── api-types.ts        # Request/response schemas
-│   │       ├── soroban.ts          # Contract invocation: simulate, sign, submit, poll
-│   │       └── transaction-logger.ts  # Tx event logging to localStorage + API
+│   │       ├── api.ts                # Typed REST client for backend :8081
+│   │       ├── api-types.ts          # Request/response schemas
+│   │       └── soroban.ts            # Contract invocation: simulate, sign, submit, poll
 │   └── next.config.js
 │
-├── scripts/
-│   ├── deploy-contracts.mjs        # WASM upload + contract deploy to Soroban RPC
-│   ├── soroban-invoke.mjs          # Node.js helper: build, sign, submit Soroban txs
-│   ├── test-setup.mjs              # Creates test data on Testnet for integration tests
-│   └── test-integration.mjs        # 5-test suite against deployed contracts
-│
 ├── infra/
-│   └── docker-compose.yml          # PostgreSQL 16 for local development
+│   └── docker-compose.yml            # Postgres 16 for local development
 │
-├── render.yaml                     # Render Blueprint for backend deployment
-├── vercel.json                     # Vercel deployment configuration
-└── Dockerfile                      # Multi-stage Rust build for backend container
+├── scripts/
+│   └── deploy-contracts.mjs          # WASM upload + contract deploy to Soroban RPC
+│
+├── stellar-connect-wallet/           # Standalone Freighter demo app (Create React App)
+│
+└── docs/                             # (Future) domain model, demo scenario, CI/CD docs
 ```
 
 ---
@@ -224,14 +192,13 @@ The Node.js helper script (`scripts/soroban-invoke.mjs`) wraps all Soroban RPC f
 
 ### Prerequisites
 
-| Dependency | Version | Purpose |
-|-----------|---------|---------|
-| Rust toolchain | nightly-2024-03+ (stable works for backend) | Backend compilation + Soroban WASM targets |
-| `wasm32v1-none` | `rustup target add wasm32v1-none` | Soroban contract compilation |
-| Node.js | 20+ | Frontend + deployment scripts |
-| Docker | 24+ | Local PostgreSQL |
-| Freighter browser extension | Latest | Stellar key management + transaction signing |
-| Stellar Testnet account | Funded via [Friendbot](https://lab.stellar.org/) | Contract deployment + wallet testing |
+| Dependency | Version | Notes |
+|-----------|---------|-------|
+| Rust toolchain | nightly-2024-03+ | For Soroban `no_std` WASM targets |
+| `wasm32v1-none` target | — | `rustup target add wasm32v1-none` |
+| Node.js | 20+ | For frontend and deploy script |
+| Docker | 24+ | For local Postgres |
+| Stellar Testnet account | — | Funded via [Stellar Lab Friendbot](https://lab.stellar.org/) |
 
 ### 1. Build Soroban Contracts
 
@@ -240,84 +207,101 @@ cd contracts
 cargo build --target wasm32v1-none --release
 ```
 
-Expected WASM artifacts (release builds — debug WASM can exceed RPC payload limits):
+Expected WASM artifacts:
 
-| Contract | Artifact Path |
-|----------|---------------|
+| Contract | Path |
+|----------|------|
 | EquipmentRegistry | `target/wasm32v1-none/release/equipment_registry.wasm` |
 | MaintenanceRecords | `target/wasm32v1-none/release/maintenance_records.wasm` |
 | MultiPartyApproval | `target/wasm32v1-none/release/multi_party_approval.wasm` |
 | ComplianceAttestation | `target/wasm32v1-none/release/compliance_attestation.wasm` |
 
-Run contract unit tests:
+> **Important:** Use **release** WASM for deployment. Debug WASM artifacts can exceed the Soroban RPC payload limit (HTTP 413).
+
+To run contract unit tests:
+
 ```bash
 cd contracts
 cargo test
-# Or per-crate:
-cargo test -p equipment-registry
 ```
 
-### 2. Start PostgreSQL
+Snapshot tests exist for `equipment-registry` (`test_snapshots/tests/`).
+
+### 2. Start Postgres
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d
-# Postgres 16 on :5432, user/pass/db: maintchain
 ```
+
+This starts Postgres 16 on port 5432 with user/password/database `maintchain`.
 
 ### 3. Run Backend
 
 ```bash
 cd backend
+# Environment variable priority: POSTGRES_URL > DATABASE_URL > default local
 export DATABASE_URL="postgres://maintchain:maintchain@localhost:5432/maintchain"
 cargo run
-# Listens on http://127.0.0.1:8081
 ```
 
+The backend listens on `http://127.0.0.1:8081`.
+
 Health check:
+
 ```bash
 curl http://localhost:8081/health
 # → {"status":"ok"}
 ```
 
-The backend auto-applies SQL migrations on startup (tables created if absent). To seed demo data:
+To seed demo data:
 
 ```bash
 cargo run --bin seed
 ```
 
-### 4. Install Frontend
+### 4. Install Frontend Dependencies
 
 ```bash
 cd frontend
 npm install
 ```
 
-Configure `frontend/.env.local`:
+### 5. Configure Environment
+
+Create `frontend/.env.local`:
+
 ```env
 NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 NEXT_PUBLIC_API_URL=http://localhost:8081
+```
 
-# After deploying contracts, add:
+Optional — after deploying contracts, add the generated contract IDs:
+
+```env
 NEXT_PUBLIC_EQUIPMENT_REGISTRY_ID=<contract_id>
 NEXT_PUBLIC_MAINTENANCE_RECORDS_ID=<contract_id>
 NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID=<contract_id>
 NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID=<contract_id>
 ```
 
-Start dev server:
+### 6. Start Frontend
+
 ```bash
+cd frontend
 npm run dev
-# Opens http://localhost:3000
 ```
 
-### 5. Freighter Wallet Setup
+Open `http://localhost:3000`.
 
-1. Install [Freighter](https://www.freighter.app/) browser extension.
+### 7. Freighter Wallet Setup
+
+1. Install [Freighter browser extension](https://www.freighter.app/).
 2. Create or import a Stellar Testnet account.
-3. Fund via [Stellar Lab Friendbot](https://lab.stellar.org/).
-4. Open MaintChain → **Connect Wallet** → confirm Freighter prompt.
+3. Fund the account via [Stellar Lab Friendbot](https://lab.stellar.org/).
+4. Open the MaintChain frontend and click **Connect Wallet**.
+5. Confirm the Freighter authorization prompt.
 
-The dashboard displays connected address, XLM balance (from Horizon Testnet), and network status.
+The dashboard displays the connected address, XLM balance (from Horizon Testnet), and network status.
 
 ---
 
@@ -325,70 +309,60 @@ The dashboard displays connected address, XLM balance (from Horizon Testnet), an
 
 ### REST API (Backend :8081)
 
-**Equipment:**
+**Equipment**
+
 ```bash
+# Register equipment
 curl -X POST http://localhost:8081/equipment \
   -H "Content-Type: application/json" \
   -d '{"equipment_id":"MCH-1104","owner_id":"00000000-0000-0000-0000-000000000001"}'
+
+# List all equipment
 curl http://localhost:8081/equipment
 ```
 
-**Maintenance Records:**
+**Maintenance Records**
+
 ```bash
+# Create order
 curl -X POST http://localhost:8081/maintenance/orders \
   -H "Content-Type: application/json" \
   -d '{"equipment_id":"MCH-1104","technician_id":"00000000-0000-0000-0000-000000000002"}'
 
+# Submit evidence (SHA-256 hash)
 curl -X POST http://localhost:8081/maintenance/<id>/evidence \
   -H "Content-Type: application/json" \
-  -d '{"evidence_hash":"0x8f2cabd9..."}'
+  -d '{"evidence_hash":"0x8f2cabd91e4d2a7c9014e1c1a3b5f6d8e0f2a4c6e8a0b2c4d6e8f0a2b4c6e8"}'
 ```
 
-**Approvals:**
+**Approvals**
+
 ```bash
+# Supervisor approve
 curl -X POST http://localhost:8081/maintenance/<id>/approvals/supervisor \
   -H "Content-Type: application/json" \
   -d '{"decision_note":"Evidence verified, parts traceable"}'
 
+# Supervisor reject
 curl -X POST http://localhost:8081/maintenance/<id>/approvals/supervisor/reject \
   -H "Content-Type: application/json" \
   -d '{"decision_note":"Missing torque readings"}'
 ```
 
-**Audit:**
+**Audit**
+
 ```bash
+# Get full audit trail
 curl http://localhost:8081/maintenance/<id>/audit
 
+# Issue compliance certificate (auditor)
 curl -X POST http://localhost:8081/maintenance/<id>/approvals/auditor \
   -H "Content-Type: application/json" \
   -d '{"decision_note":"Compliance verified — all approvals complete"}'
 ```
 
-**Authentication (Challenge-Response):**
-```bash
-# Request nonce
-curl -X POST http://localhost:8081/api/auth/challenge \
-  -H "Content-Type: application/json" \
-  -d '{"stellar_address":"G..."}'
-# → {"nonce":"...","expires_at":"...","message":"..."}
+**Hash Utility**
 
-# Verify signature (signed XDR from Freighter)
-curl -X POST http://localhost:8081/api/auth/verify \
-  -H "Content-Type: application/json" \
-  -d '{"stellar_address":"G...","nonce":"...","signature":"..."}'
-# → {"verified":true,"token":"...","expires_at":"..."}
-```
-
-**Transaction Log:**
-```bash
-# List recent tx log entries
-curl http://localhost:8081/api/tx-log?limit=20
-
-# Filter by wallet
-curl "http://localhost:8081/api/tx-log?wallet=G...&limit=10"
-```
-
-**Hash Utility:**
 ```bash
 curl -X POST http://localhost:8081/hash/evidence \
   -H "Content-Type: application/json" \
@@ -398,147 +372,204 @@ curl -X POST http://localhost:8081/hash/evidence \
 
 ### Frontend Routes
 
-| Route | Purpose | On-Chain Integration |
-|-------|---------|---------------------|
-| `/` | Landing: Hero, Trust Replay, stats, industry coverage | — |
-| `/dashboard` | Worker dashboard with SVG metrics, compliance score | Compliance dashboard API |
-| `/upload` | Evidence upload with drag-drop zone | `MaintenanceRecords.submit_evidence` |
-| `/approve` | Supervisor approval center | `MultiPartyApproval.approve_by_supervisor` |
-| `/audit` | Audit timeline + certificate issuance | `ComplianceAttestation.issue_certificate` |
-| `/technician` | Technician task list | Maintenance records API |
-| `/workers` | Worker discovery directory | Worker profiles API |
-| `/machines` | Machine passport directory | Equipment registry |
-| `/certificates` | Certificate registry | Attestation contract |
-| `/live-network` | Real-time activity feed | Transaction log API |
-| `/leaderboard` | Global trust rankings | Worker stats API |
-| `/industries` | Industry coverage | — |
-| `/register` | User registration with wallet connect | Users API |
-| `/users` | User directory with search/filter | `GET /users`, `GET /users/count` |
-| `/feedback` | 5-star rating feedback form | Sentry + feedback API |
+| Route | Purpose |
+|-------|---------|
+| `/` | Landing page: Hero, Trust Replay, stats, comparison, network feed, featured workers, industries |
+| `/live-network` | Real-time activity feed with filtering |
+| `/workers` | Worker discovery: search, filter by industry, sort by trust/experience/response time |
+| `/workers/:slug` | Full worker profile: reputation dimensions, skills, reviews, certificates, repair history |
+| `/machines` | Machine passport directory |
+| `/machines/:id` | Machine detail with event timeline and certificates |
+| `/certificates` | Certificate registry |
+| `/certificates/:id` | Certificate detail with approval chain and blockchain record |
+| `/leaderboard` | Global trust rankings: top workers, trust growth, evidence quality, zero-complaint |
+| `/industries` | Industry coverage (manufacturing, automotive, mining, energy, etc.) |
+| `/dashboard` | Worker dashboard: trust score SVG radial, weekly rank progress, mini activity chart |
+| `/upload` | Evidence upload with drag-drop zone and loading state |
+| `/approve` | Supervisor approval center with approval history timeline |
+| `/audit` | Audit timeline with visual connected timeline and certificate issuance |
+| `/technician` | Technician task list with action buttons |
 
-### Deployed Contracts (Stellar Testnet)
 
-| Contract | Address | Deploy TX |
-|----------|---------|-----------|
-| MultiPartyApproval | [`CBPH…JOYH`](https://lab.stellar.org/r/testnet/contract/CBPHZFRYKSE6PUWHU2HSNQTWBQ47GYV3U73KXPSOPIX3QLQJ7MLSJOYH) | [f637…ac53](https://stellar.expert/explorer/testnet/tx/f6378948f57e4d6555308c39e1e3cdc5e61522eb18119a84194299b8dda0ac53) |
-| EquipmentRegistry | [`CAT5…WEW`](https://lab.stellar.org/r/testnet/contract/CAT57KYD2WU5QMNBSGB4FJQ37JUUQRKFDMZVPTJZVFC2H44EKWKZWWEW) | [037c…7863](https://stellar.expert/explorer/testnet/tx/037c5b9f2204df92e975111e9d7d96027b90b9ae26c89aaeccf595414fab7863) |
-| MaintenanceRecords | [`CBRI…775Z`](https://lab.stellar.org/r/testnet/contract/CBRIGG27YRAXG5H74ZOWSSJGMSTPQHZXJCDXA23QSSBIH6VYZZR4775Z) | [bb8e…aae](https://stellar.expert/explorer/testnet/tx/bb8e10e0d5ce6d85e5019d5da8650e6cd1ec85c05f937041183c7097c1b06aae) |
-| ComplianceAttestation | [`CBR4…VIN`](https://lab.stellar.org/r/testnet/contract/CBR4HHPWRDXMJJOG65B6I5TRIBBUFAXAMUCTAJANAPBAIJHPKRUTCVIN) | [295c…1ef](https://stellar.expert/explorer/testnet/tx/295cf00852671856ea524a69bafd2bc1c159a73d18ffc411749fc6312f11b1ef) |
 
-Custom deployment:
+### Testnet Contract Deployments
+
+The following contracts are deployed on Stellar Testnet:
+
+| Contract | Deploy TX | Contract Address |
+|----------|-----------|------------------|
+| MultiPartyApproval | [f637…ac53](https://stellar.expert/explorer/testnet/tx/f6378948f57e4d6555308c39e1e3cdc5e61522eb18119a84194299b8dda0ac53) | [`CBPH…JOYH`](https://lab.stellar.org/r/testnet/contract/CBPHZFRYKSE6PUWHU2HSNQTWBQ47GYV3U73KXPSOPIX3QLQJ7MLSJOYH) |
+| EquipmentRegistry | [037c…7863](https://stellar.expert/explorer/testnet/tx/037c5b9f2204df92e975111e9d7d96027b90b9ae26c89aaeccf595414fab7863) | [`CAT5…WEW`](https://lab.stellar.org/r/testnet/contract/CAT57KYD2WU5QMNBSGB4FJQ37JUUQRKFDMZVPTJZVFC2H44EKWKZWWEW) |
+| MaintenanceRecords | [bb8e…aae](https://stellar.expert/explorer/testnet/tx/bb8e10e0d5ce6d85e5019d5da8650e6cd1ec85c05f937041183c7097c1b06aae) | [`CBRI…775Z`](https://lab.stellar.org/r/testnet/contract/CBRIGG27YRAXG5H74ZOWSSJGMSTPQHZXJCDXA23QSSBIH6VYZZR4775Z) |
+| ComplianceAttestation | [295c…1ef](https://stellar.expert/explorer/testnet/tx/295cf00852671856ea524a69bafd2bc1c159a73d18ffc411749fc6312f11b1ef) | [`CBR4…VIN`](https://lab.stellar.org/r/testnet/contract/CBR4HHPWRDXMJJOG65B6I5TRIBBUFAXAMUCTAJANAPBAIJHPKRUTCVIN) |
+
+### Deploying Contracts Yourself
+
 ```bash
-export DEPLOYER_SECRET_KEY="S<your_testnet_secret>"
+# Prerequisites: WASM files built, DEPLOYER_SECRET_KEY set
+export DEPLOYER_SECRET_KEY="S<your_testnet_secret_key>"
 node scripts/deploy-contracts.mjs
 ```
 
+The script uploads each WASM blob to Soroban RPC and deploys the contract, printing contract IDs and `.env.local` entries.
+
+> For the complete contract deployment pipeline — including environment variables, RPC endpoints, and troubleshooting — see [STELLAR_INTEGRATION.md](./STELLAR_INTEGRATION.md#7-contract-deployment-pipeline).
+
 ---
+
+
+
+# [SYSTEM DESIGN EXPLAINED](https://maintchainsysdesign.vercel.app/)
 
 ## Validation
 
-### Build Verification
+### Contract Tests
 
 ```bash
-# Backend: verify type correctness + dependency resolution
-cd backend && cargo check
+cd contracts
+cargo test
 
-# Frontend: production build with type checking + linting
-cd frontend && npm run build && npm run lint
-
-# Contracts: unit tests
-cd contracts && cargo test
+# Run specific contract tests
+cargo test -p equipment-registry
+cargo test -p maintenance-records
+cargo test -p multi-party-approval
+cargo test -p compliance-attestation
 ```
 
-### Integration Tests (against Testnet)
+Snapshot tests for `equipment-registry` are stored in `contracts/equipment-registry/test_snapshots/tests/`.
 
-Requires env vars for deployed contract IDs and a funded deployer account:
+### Backend
 
 ```bash
-export SOROBAN_RPC_URL="https://soroban-testnet.stellar.org"
-export DEPLOYER_SECRET_KEY="S<your_secret>"
-export NEXT_PUBLIC_EQUIPMENT_REGISTRY_ID="<id>"
-export NEXT_PUBLIC_MAINTENANCE_RECORDS_ID="<id>"
-export NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID="<id>"
-export NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID="<id>"
-
-# Step 1: Create test data (equipment + maintenance record)
-node scripts/test-setup.mjs
-# → Exports TEST_EQUIPMENT_ID, TEST_MAINTENANCE_ID, TEST_CERT_HASH
-
-# Step 2: Run 5-test suite
-export TEST_EQUIPMENT_ID="<from step 1>"
-export TEST_MAINTENANCE_ID="<from step 1>"
-node scripts/test-integration.mjs
+cd backend
+cargo build
+# Start backend + Postgres, then:
+curl http://localhost:8081/health
+curl http://localhost:8081/health/config  # Shows database URL prefix (masked)
 ```
 
-Tests cover: equipment registration simulation, maintenance record retrieval, multi-party approval simulation (technician + supervisor), compliance attestation, and contract event emission verification.
+### Frontend
 
-### End-to-End Compliance Flow
+```bash
+cd frontend
+npm run build        # Production build with type checking + linting
+npm run lint         # ESLint
+npm run dev          # Dev server with HMR
+```
 
-A complete end-to-end scenario exercises:
-1. Wallet connection (Freighter) → challenge-response verification
-2. Equipment registration → maintenance order creation
-3. Evidence upload with on-chain hash submission
-4. Supervisor approval (on-chain via `approve_by_supervisor`)
-5. Supervisor rejection path (on-chain via `reject_by_supervisor`)
-6. Audit trail retrieval (on-chain mirrored to PostgreSQL)
-7. Compliance certificate issuance (cross-contract: approval → attestation)
+The build generates 18 static pages. To verify all routes render correctly, start the dev server and navigate to each route listed in the Usage section.
 
-### Monitoring
+### End-to-End Demo Scenario
 
-- **Sentry** captures frontend JavaScript errors, backend Rust panics, and transaction performance traces (sample rate: 10%).
-- **Transaction log** (`transaction_log` table) records every on-chain operation's lifecycle: simulation latency, submission status, retry count, and final outcome.
-- **Health endpoint**: `GET /health` (liveness), `GET /health/config` (DB connection diagnostics with masked credentials).
+A complete demo scenario (including a rejected supervisor submission followed by successful resubmission) exercises:
+
+1. Equipment registration
+2. Maintenance order creation
+3. Evidence upload with hash computation
+4. Supervisor approval (with a rejection path)
+5. Audit trail retrieval
+6. Compliance certificate issuance
+
+
 
 ---
 
 ## Results
 
-### Design System
+### Visual Design System
 
-The frontend implements an **Editorial + Glass** aesthetic: numbered editorial sections (01–08), frosted glass surfaces (`backdrop-filter: blur(20px)`), hairline borders, and a CSS variable system for consistent theming. All 18 routes render correctly at 320px, 768px, 1024px, and 1280px viewports.
+The frontend implements an **Editorial + Glass** aesthetic:
 
-### Transaction Lifecycle Transparency
+- **Editorial masthead**: Numbered sections (01–08) with monospace identifiers, "Edition 47" strip, Soroban ledger indicators
+- **Glass components**: Frosted surfaces (`backdrop-filter: blur(20px)`), hairline borders, subtle box shadows with blue/green glow variants
+- **CSS variable system**: All colors, borders, and shadows referenced through custom properties in `globals.css` for consistent theming
+- **Responsive**: Slide-out mobile navigation, adaptive grid layouts, touch-friendly interaction targets
+- **Animations**: Sub-300ms transitions on hover, `fadeSlideUp` on notifications, `slideIn` on mobile nav
 
-Every on-chain operation now surfaces a real-time progress indicator with 7 visual steps (Prepare → Simulate → Sign → Submit → Confirm → Sync → Done), explicit error states with retry capability, and blockchain explorer links for confirmed transactions. Failed operations are classified as retryable (RPC errors, timeouts) or terminal (contract revert, insufficient balance) with appropriate UX treatment.
+All landing page components pass visual inspection with zero console errors (verified via browser at 768px and 1280px viewports).
 
-### Auth Security
-
-Wallet ownership verification uses the Stellar standard approach: embed a nonce in a transaction memo and verify the ed25519 signature server-side. Nonces are single-use with 5-minute TTL, preventing replay attacks. Session tokens use HMAC-SHA256 with a configurable server secret.
 
 ### Contract Coverage
 
-All four contracts compile and pass Soroban SDK v21 build checks. Three contracts now emit standardized Soroban events (`approve`, `reject`, `evidence`, `certify`, `complete`, `status`, `audit`) for off-chain event indexing.
+- **EquipmentRegistry**: 3 unit tests covering registration, version retrieval, and owner transfer (verified via snapshot tests)
+- **MaintenanceRecords**: CRUD operations for the maintenance order state machine
+- **MultiPartyApproval**: Approval bitmap with configurable auditor requirement
+- **ComplianceAttestation**: Certificate issuance with cross-contract invocation scaffolded
+
+### Monitoring & Analytics
+
+MaintChain integrates **Sentry** for error tracking and performance monitoring across both frontend and backend:
+
+- **Frontend**: `@sentry/nextjs` — captures JavaScript errors, unhandled promise rejections, and performance data. Session replay samples 10% of sessions (100% on error).
+- **Backend**: `sentry + sentry-tower` — captures server-side errors and request performance. Configurable via `SENTRY_DSN` environment variable.
+- **User Feedback**: A floating feedback widget (`FeedbackButton`) submits user feedback to Sentry's User Feedback API, capturing error context automatically.
+
+
 
 ### Deployment
 
-| Service | Platform | Configuration |
-|---------|----------|---------------|
-| Frontend | Vercel | Import repo → auto-deploy on push to main |
-| Backend | Render | `render.yaml` Blueprint with Docker |
-| Database | Supabase (Postgres 16) | Pooled connection via pooler.supabase.com |
-| Smart Contracts | Stellar Testnet | 4 Soroban contracts with verified addresses |
+### Deployed Infrastructure
+
+| Service | Platform | URL / Location |
+|---------|----------|----------------|
+| Frontend | Vercel | Import this GitHub repo via [vercel.com](https://vercel.com) |
+| Backend (Rust API) | Render | `https://maintchain.onrender.com` |
+| Database | Supabase | Supabase Postgres via pooler.supabase.com |
+| Smart Contracts | Stellar Testnet | 4 Soroban contracts (see [deployment table](#testnet-contract-deployments)) |
+
+### Frontend (Vercel) Deployment
+
+The frontend is a Next.js 14 app (App Router) ready for Vercel deployment:
+
+1. **Push the repo** to GitHub.
+2. In [Vercel Dashboard](https://vercel.com), click **Add New → Project** and import the GitHub repo.
+3. Vercel auto-detects Next.js. Keep the default build settings:
+   - Framework: Next.js
+   - Build Command: `next build`
+   - Output Directory: `.next`
+   - Install Command: `npm install`
+4. **Set environment variables** in Vercel Dashboard → Project Settings → Environment Variables:
+
+   ```env
+   NEXT_PUBLIC_API_URL=https://maintchain.onrender.com
+   NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+   NEXT_PUBLIC_EQUIPMENT_REGISTRY_ID=CAT57KYD2WU5QMNBSGB4FJQ37JUUQRKFDMZVPTJZVFC2H44EKWKZWWEW
+   NEXT_PUBLIC_MAINTENANCE_RECORDS_ID=CBRIGG27YRAXG5H74ZOWSSJGMSTPQHZXJCDXA23QSSBIH6VYZZR4775Z
+   NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID=CBPHZFRYKSE6PUWHU2HSNQTWBQ47GYV3U73KXPSOPIX3QLQJ7MLSJOYH
+   NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID=CBR4HHPWRDXMJJOG65B6I5TRIBBUFAXAMUCTAJANAPBAIJHPKRUTCVIN
+   ```
+
+5. **Deploy!** Vercel builds and deploys automatically. Each push to `main` triggers a redeployment.
+
+> **Note:** The `next.config.js` includes webpack aliases for `sodium-native` and `require-addon` — these are Node.js native addons that can't run in the browser. The Stellar SDK wraps them in try/catch and falls back to tweetnacl. The aliases prevent bundling errors on Vercel.
+
+### Backend (Render)
+
+The backend is containerized via Docker and deployed on Render using the `render.yaml` Blueprint. See `render.yaml` for service configuration.
 
 ---
 
 ## Limitations
 
-1. **Cross-contract invocation depends on Soroban SDK symbol length.** The `ComplianceAttestation.issue_certificate` function calls `MultiPartyApproval.verify` and `MaintenanceRecords.complete` — function symbols must be ≤ 9 characters for SDK v21. The current deployment uses short symbols (`verify`, `complete`) that match.
+1. **Cross-contract invocation is stubbed.** The `ComplianceAttestation.issue_certificate` function performs cross-contract calls but the Soroban SDK v21 symbol-length constraint requires careful matching. Full wiring is in progress.
 
-2. **RPC polling has no fallback.** `invokeContract` polls `getTransaction` at 1s intervals for up to 15s. If the Soroban RPC endpoint is slow or unavailable, contract calls fail with no retry queuing at the frontend layer. The backend's Node.js helper implements retry, but the frontend uses direct Freighter → RPC calls.
+2. **Soroban RPC dependency.** The frontend's `invokeContract` helper polls `getTransaction` up to 15 times (15 seconds). If the Soroban RPC endpoint is slow or unavailable, contract calls will fail. No fallback queuing is implemented.
 
-3. **Evidence files are not stored by the backend.** The evidence hash is stored both on-chain and in PostgreSQL, but the uploaded file itself is only kept if Pinata (IPFS) is configured. Without Pinata credentials, the file is hashed and discarded.
+3. **Off-chain evidence storage.** The backend stores evidence hashes but not the evidence files themselves. A production deployment would need IPFS, S3, or equivalent for media storage.
 
-4. **API authentication is not wired.** The `Authorization: Bearer` middleware (`API_KEY_ENV`) is implemented but not applied to any route. All endpoints are public when running in development mode.
+4. **API authentication is demo-grade.** The `Authorization: Bearer` header check (`API_KEY_ENV`) exists but is not wired into the router. The backend trusts all origins in development via `CorsLayer::permissive()`.
 
-5. **Demo data is hardcoded.** Worker profiles, machine metadata, certificates, and leaderboard entries are defined in `frontend/src/data/maintchain.ts`. A production system would hydrate these from the API.
+5. **Database URL handling.** The backend attempts to append `?sslmode=require` to all non-HTTPS connection strings. This works for Supabase and standard Postgres but may conflict with connection poolers.
 
-6. **Rejection path does not update on-chain state.** When a supervisor rejects via the frontend, the `reject_by_supervisor` contract function is not called. The rejection is recorded in PostgreSQL but the on-chain approval bitmap still shows the previous state. This is a known gap between the backend and contract paths.
+6. **Placeholder pages.** Routes `/docs`, `/privacy`, `/terms`, `/contact` render generic placeholders.
 
-7. **Missing contract access control.** `MaintenanceRecords.update_status` and several MultiPartyApproval functions do not verify `env.invoker()`. Any caller can invoke these functions. Production deployment requires caller verification against known addresses.
+7. **No CI/CD pipeline.** Contract deployment and backend release are manual. CI/CD configuration is proposed but not wired.
 
-8. **No CI/CD for contracts.** Contract deployment and WASM rebuilds are manual. CI/CD is configured for the frontend and backend only.
+8. **Soroban SDK version.** Contracts target SDK v21. SDK v22+ changed the cross-contract invocation API.
 
-9. **Soroban SDK v21.** The contracts use SDK v21. SDK v22+ changed the cross-contract invocation API (`env.invoke_contract` signatures differ).
+9. **Demo data is hardcoded.** Worker profiles, machine metadata, certificates, and leaderboard entries are defined in `frontend/src/data/maintchain.ts`. A production system would hydrate these from the API.
+
+> For a complete list of known issues, planned improvements, and the development roadmap, see [PROJECT_GUIDE.md](./PROJECT_GUIDE.md#8-current-status--roadmap) and [STELLAR_INTEGRATION.md](./STELLAR_INTEGRATION.md#9-known-limitations--roadmap).
 
 ---
 
@@ -546,31 +577,22 @@ All four contracts compile and pass Soroban SDK v21 build checks. Three contract
 
 ### Code Conventions
 
-- **Rust contracts**: `no_std`, Soroban SDK v21. Tests use `soroban_sdk::testutils`. Short function symbols (≤ 9 chars) for cross-contract call compatibility.
-- **Rust backend**: Axum handlers in separate modules per domain. SQL queries inline (no ORM). Migrations in `backend/migrations/` auto-applied on startup via `sqlx::Migrator`.
-- **TypeScript frontend**: Next.js 14 App Router. CSS variables in `globals.css`. UI components in `frontend/src/components/maintchain/`. Data fetching via typed API client in `lib/api.ts`.
-- **API**: RESTful plural nouns, POST for mutations, GET for reads. Structured error responses with `ApiErrorResponse` type.
+- **Rust contracts**: `no_std`, Soroban SDK v21 patterns. Tests use `soroban_sdk::testutils`.
+- **Rust backend**: Axum handlers in separate modules (`audit.rs`, `complaint.rs`). SQL queries inline (no ORM). Migrations in `backend/migrations/`.
+- **TypeScript frontend**: Next.js 14 App Router. Design system via CSS variables in `globals.css`. UI components in `frontend/src/components/maintchain/`. Data layer in `frontend/src/data/`.
+- **API**: RESTful plural nouns (`/equipment`, `/maintenance`), POST for mutation, GET for reads. Structured error responses (`ApiErrorResponse`).
 
 ### Development Workflow
 
-```bash
-# 1. Make changes
-# 2. Run contract tests
-cd contracts && cargo test
+1. Make changes in the relevant crate or package.
+2. Run contract tests: `cd contracts && cargo test`
+3. Run backend: `cd backend && cargo run`
+4. Run frontend: `cd frontend && npm run dev`
+5. Verify build: `cd frontend && npm run build`
 
-# 3. Verify backend compiles
-cd backend && cargo check
+### Design System Changes
 
-# 4. Build frontend (type check + lint)
-cd frontend && npm run build && npm run lint
-
-# 5. Run integration tests (requires Testnet env)
-node scripts/test-setup.mjs && node scripts/test-integration.mjs
-```
-
-### Design System Variables
-
-All colors, borders, and glass effects are controlled through CSS custom properties in `frontend/src/app/globals.css`:
+Color, spacing, and glass effects are controlled through CSS custom properties in `frontend/src/app/globals.css`. The canonical variables are:
 
 ```css
 :root {
@@ -582,8 +604,7 @@ All colors, borders, and glass effects are controlled through CSS custom propert
   --text-secondary: #64748b;
   --border: #e2e8f0;
   --glass-surface: rgba(255, 255, 255, 0.78);
-  --glass-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset,
-                   0 8px 32px rgba(15, 23, 42, 0.07);
+  --glass-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 8px 32px rgba(15, 23, 42, 0.07);
 }
 ```
 
@@ -591,4 +612,7 @@ All colors, borders, and glass effects are controlled through CSS custom propert
 
 ## License
 
-This project is provided for demonstration and evaluation. No license is specified — see the repository owner for usage terms.
+This project is provided for demonstration and evaluation purposes. No license is specified — see the repository owner for usage terms.
+
+
+[def]: Live-webpage.png
