@@ -662,6 +662,35 @@ async fn get_user_by_stellar(
     Ok(Json(row))
 }
 
+async fn list_users(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<UserResponse>>, (StatusCode, String)> {
+    let rows = sqlx::query_as::<_, UserResponse>(
+        r#"SELECT id, stellar_address, name, role, organization, created_at FROM users ORDER BY created_at DESC"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        error!("list_users failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
+    })?;
+    Ok(Json(rows))
+}
+
+#[derive(Debug, Serialize)]
+struct UserCountResponse {
+    total_users: i64,
+}
+
+async fn user_count(
+    State(state): State<AppState>,
+) -> Result<Json<UserCountResponse>, (StatusCode, String)> {
+    let count: (i64,) = sqlx::query_as::<_, (i64,)>(r#"SELECT COUNT(*) FROM users"#)
+        .fetch_one(&state.db).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(UserCountResponse { total_users: count.0 }))
+}
+
 async fn list_pending_approvals(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MaintenanceResponse>>, (StatusCode, String)> {
@@ -832,7 +861,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/maintenance/pending", get(list_pending_approvals))
         .route("/compliance/dashboard", get(compliance_dashboard))
-        .route("/users", post(register_user))
+        .route("/users", get(list_users).post(register_user))
+        .route("/users/count", get(user_count))
         .route("/users/:stellar_address", get(get_user_by_stellar))
 
         // Sentry middleware — captures performance data and errors for all requests
