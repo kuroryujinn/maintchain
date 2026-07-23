@@ -6,7 +6,7 @@ import WalletConnectPanel from '@/components/WalletConnectPanel';
 import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
 import type { MaintenanceResponse } from '@/lib/api-types';
-import { CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toBytesN32 } from '@/lib/soroban';
 
 const MULTI_PARTY_APPROVAL_ID = process.env.NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID || '';
@@ -18,6 +18,7 @@ export default function ApprovalCenter() {
   const [loading, setLoading] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [onChainWarning, setOnChainWarning] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isConnected) return;
@@ -51,7 +52,8 @@ export default function ApprovalCenter() {
           );
           onChainTx = txResult.transactionHash;
         } catch (sorobanError) {
-          console.warn('Soroban approve_by_supervisor failed:', sorobanError);
+          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
+          setOnChainWarning(`On-chain approval failed (${errMsg.slice(0, 80)}). Approval is saved in the database but the on-chain record may be incomplete.`);
         }
       }
 
@@ -86,7 +88,8 @@ export default function ApprovalCenter() {
           );
           onChainTx = txResult.transactionHash;
         } catch (sorobanError) {
-          console.warn('Soroban reject_by_supervisor failed:', sorobanError);
+          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
+          setOnChainWarning(`On-chain rejection failed (${errMsg.slice(0, 80)}). Rejection is saved in the database but the on-chain record may be incomplete.`);
         }
       }
 
@@ -113,6 +116,18 @@ export default function ApprovalCenter() {
 
       {isConnected && (
         <div className="space-y-4">
+          {onChainWarning && (
+            <div
+              className="glass px-4 py-3 text-sm"
+              style={{ borderColor: 'rgba(217, 119, 6, 0.35)', color: '#92400e' }}
+            >
+              <div className="font-semibold flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" />
+                On-chain record incomplete
+              </div>
+              <div className="mt-1 text-xs">{onChainWarning}</div>
+            </div>
+          )}
           {(error || txHash) && (
             <div
               className="glass px-4 py-3 text-sm"

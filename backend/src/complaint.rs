@@ -7,13 +7,13 @@ use axum::http::StatusCode;
 use sqlx::PgPool;
 use uuid::Uuid;
 use sha2::{Digest, Sha256};
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 use crate::soroban_client::SorobanClient;
 
 /// Check whether the maintenance record is eligible for compliance
 /// by verifying both a SUPERVISOR and an AUDITOR have approved in the database.
-/// This replaces the previous Soroban RPC call which always returned true.
+/// Also verifies on-chain via Soroban if the contract ID is configured.
 pub async fn is_eligible_for_compliance(
     db: &PgPool,
     maintenance_id: Uuid,
@@ -40,14 +40,35 @@ pub async fn is_eligible_for_compliance(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let eligible = supervisor_approved.0 > 0 && auditor_approved.0 > 0;
-    if !eligible {
+    let db_eligible = supervisor_approved.0 > 0 && auditor_approved.0 > 0;
+    if !db_eligible {
         info!(
             "maintenance_id={} not eligible: supervisor_approved={}, auditor_approved={}",
             maintenance_id, supervisor_approved.0, auditor_approved.0
         );
+        return Ok(false);
     }
-    Ok(eligible)
+
+    // Also verify on-chain via Soroban if APPROVAL_CONTRACT_ID is configured
+    let approval_contract = std::env::var("APPROVAL_CONTRACT_ID").unwrap_or_default();
+    if !approval_contract.is_empty() {
+        let client = SorobanClient::new();
+        match client.verify_compliance(maintenance_id.as_bytes()).await {
+            Ok(true) => {
+                info!("maintenance_id={} verified on-chain", maintenance_id);
+            }
+            Ok(false) => {
+                info!("maintenance_id={} NOT verified on-chain (approval mismatch)", maintenance_id);
+                return Ok(false);
+            }
+            Err(_) => {
+                warn!("maintenance_id={} on-chain check failed, relying on DB check", maintenance_id);
+                // DB says eligible, on-chain check failed — use DB as fallback
+            }
+        }
+    }
+
+    Ok(true)
 }
 
 /// Transition record to COMPLIANT by triggering the on-chain attestation.

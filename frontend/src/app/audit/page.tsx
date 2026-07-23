@@ -71,6 +71,7 @@ export default function AuditTimeline() {
 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [onChainWarning, setOnChainWarning] = useState<string | null>(null);
   const [auditData, setAuditData] = useState<AuditResponse | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [certifying, setCertifying] = useState(false);
@@ -189,7 +190,8 @@ export default function AuditTimeline() {
           );
           onChainTx = txResult.transactionHash;
         } catch (sorobanError) {
-          console.warn('Soroban issue_certificate failed:', sorobanError);
+          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
+          setOnChainWarning(`On-chain certificate issuance failed (${errMsg.slice(0, 80)}). Certificate is recorded in the database but the blockchain record may be incomplete.`);
         }
       }
 
@@ -238,6 +240,20 @@ export default function AuditTimeline() {
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-lg text-[var(--text-primary)]">Maintenance Event #REC-DE-4471</h3>
                 </div>
+
+                {/* On-chain warning banner */}
+                {onChainWarning && (
+                  <div
+                    className="mt-4 glass px-4 py-3 text-sm motion-safe:animate-[fadeSlideUp_0.3s_ease-out]"
+                    style={{ borderColor: 'rgba(217, 119, 6, 0.35)', color: '#92400e' }}
+                  >
+                    <div className="flex items-center gap-2 font-semibold">
+                      <AlertCircle className="h-4 w-4" />
+                      On-chain transaction incomplete
+                    </div>
+                    <div className="mt-1 text-xs">{onChainWarning}</div>
+                  </div>
+                )}
 
                 {/* Status / error banner */}
                 {(error || txHash) && (

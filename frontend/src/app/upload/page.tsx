@@ -16,12 +16,14 @@ export default function EvidenceUpload() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [onChainWarning, setOnChainWarning] = useState<string | null>(null);
 
   const handleUpload = async () => {
     if (!file || !maintenanceId) return;
     setUploading(true);
     setUploadResult(null);
     setUploadError(null);
+    setOnChainWarning(null);
     try {
       // 1. Compute hash via the backend's hash utility
       const hash = await api.computeHash({
@@ -45,8 +47,9 @@ export default function EvidenceUpload() {
           );
           onChainTx = txResult.transactionHash;
         } catch (sorobanError) {
-          // Soroban call failed — continue with backend-only submission
-          console.warn('Soroban submit_evidence failed:', sorobanError);
+          // Soroban call failed — surface warning but continue with backend-only submission
+          const errMsg = sorobanError instanceof Error ? sorobanError.message : String(sorobanError);
+          setOnChainWarning(`On-chain submission failed (${errMsg.slice(0, 80)}). Evidence is saved in the database but the blockchain record may be incomplete.`);
         }
       }
 
@@ -161,6 +164,15 @@ export default function EvidenceUpload() {
                 Evidence submitted
               </div>
               <p className="mt-1 font-mono text-xs">{uploadResult}</p>
+            </div>
+          )}
+          {onChainWarning && (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 motion-safe:animate-[fadeSlideUp_0.3s_ease-out]">
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertCircle className="h-4 w-4" />
+                On-chain submission incomplete
+              </div>
+              <p className="mt-1 text-xs">{onChainWarning}</p>
             </div>
           )}
           {uploadError && (
