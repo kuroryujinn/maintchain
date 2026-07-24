@@ -10,9 +10,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::PgPool;
 use uuid::Uuid;
-use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "tx_status", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -45,122 +43,6 @@ pub struct TxLogEntry {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
-}
-
-/// Create a new transaction log entry.
-pub async fn create_tx_log(
-    db: &PgPool,
-    wallet_address: &str,
-    contract_id: &str,
-    method: &str,
-    args: Option<Value>,
-) -> Result<Uuid, sqlx::Error> {
-    let id = Uuid::new_v4();
-    sqlx::query(
-        r#"
-        INSERT INTO transaction_log (id, wallet_address, contract_id, method, args, status)
-        VALUES ($1, $2, $3, $4, $5, 'PREPARING')
-        "#,
-    )
-    .bind(id)
-    .bind(wallet_address)
-    .bind(contract_id)
-    .bind(method)
-    .bind(args)
-    .execute(db)
-    .await?;
-
-    info!("tx_log: created entry {} for {}.{}", id, contract_id, method);
-    Ok(id)
-}
-
-/// Update the status of a transaction log entry.
-pub async fn update_tx_status(
-    db: &PgPool,
-    id: Uuid,
-    status: TxStatus,
-    extra: Option<Value>,
-) -> Result<(), sqlx::Error> {
-    let now = chrono::Utc::now();
-
-    let hash = extra.as_ref().and_then(|v| v.get("transaction_hash").and_then(|h| h.as_str().map(String::from)));
-    let xdr = extra.as_ref().and_then(|v| v.get("transaction_xdr").and_then(|x| x.as_str().map(String::from)));
-    let error = extra.as_ref().and_then(|v| v.get("error_message").and_then(|e| e.as_str().map(String::from)));
-    let ledger = extra.as_ref().and_then(|v| v.get("ledger").and_then(|l| l.as_i64().map(|n| n as i32)));
-    let rpc_latency = extra.as_ref().and_then(|v| v.get("rpc_latency_ms").and_then(|r| r.as_i64().map(|n| n as i32)));
-    let gas = extra.as_ref().and_then(|v| v.get("gas_used").and_then(|g| g.as_i64().map(|n| n as i32)));
-    let sim = extra.as_ref().and_then(|v| v.get("simulation_result").cloned());
-
-    let is_terminal = status == TxStatus::Confirmed || status == TxStatus::Failed;
-
-    sqlx::query(
-        r#"
-        UPDATE transaction_log
-        SET status = $2,
-            transaction_hash = COALESCE($3, transaction_hash),
-            transaction_xdr = COALESCE($4, transaction_xdr),
-            error_message = COALESCE($5, error_message),
-            ledger = COALESCE($6, ledger),
-            rpc_latency_ms = COALESCE($7, rpc_latency_ms),
-            gas_used = COALESCE($8, gas_used),
-            simulation_result = COALESCE($9, simulation_result),
-            updated_at = $10,
-            completed_at = CASE WHEN $11 THEN $10 ELSE completed_at END
-        WHERE id = $1
-        "#,
-    )
-    .bind(id)
-    .bind(&status)
-    .bind(hash)
-    .bind(xdr)
-    .bind(error)
-    .bind(ledger)
-    .bind(rpc_latency)
-    .bind(gas)
-    .bind(sim)
-    .bind(now)
-    .bind(is_terminal)
-    .execute(db)
-    .await?;
-
-    Ok(())
-}
-
-/// Increment retry count for a transaction.
-pub async fn increment_retry(db: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"
-        UPDATE transaction_log
-        SET retry_count = retry_count + 1,
-            updated_at = now()
-        WHERE id = $1
-        "#,
-    )
-    .bind(id)
-    .execute(db)
-    .await?;
-
-    Ok(())
-}
-
-/// Get recent transactions for a wallet.
-pub async fn get_wallet_transactions(
-    db: &PgPool,
-    wallet_address: &str,
-    limit: i64,
-) -> Result<Vec<TxLogEntry>, sqlx::Error> {
-    sqlx::query_as::<_, TxLogEntry>(
-        r#"
-        SELECT * FROM transaction_log
-        WHERE wallet_address = $1
-        ORDER BY created_at DESC
-        LIMIT $2
-        "#,
-    )
-    .bind(wallet_address)
-    .bind(limit)
-    .fetch_all(db)
-    .await
 }
 
 // ── API Handlers ──

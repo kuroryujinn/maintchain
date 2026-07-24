@@ -20,6 +20,8 @@ mod storage;
 #[allow(dead_code)]
 mod seed;
 use audit::{approve_by_auditor, get_audit_trail};
+use complaint::check_eligibility;
+use soroban_client::{get_onchain_attestation, get_onchain_record};
 mod auth;
 mod tx_log;
 
@@ -314,7 +316,9 @@ async fn create_maintenance_order(
         maintenance_id, req.equipment_id, req.technician_id
     );
 
-    let placeholder_evidence_hash = "PENDING".to_string();
+    // Initial status is OPEN with no evidence yet.
+    // Evidence hash will be set when the technician submits evidence.
+    let initial_evidence_hash = "PENDING".to_string();
 
     let inserted = sqlx::query(
         r#"
@@ -325,7 +329,7 @@ async fn create_maintenance_order(
     .bind(maintenance_id)
     .bind(req.equipment_id)
     .bind(req.technician_id)
-    .bind(&placeholder_evidence_hash)
+    .bind(&initial_evidence_hash)
     .execute(&state.db)
     .await;
 
@@ -863,6 +867,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/maintenance/pending", get(list_pending_approvals))
         .route("/compliance/dashboard", get(compliance_dashboard))
+        .route("/compliance/eligible/:id", get(check_eligibility))
+        .route("/compliance/attestation/:id", get(get_onchain_attestation))
+        .route("/onchain/record/:id", get(get_onchain_record))
         .route("/users", get(list_users).post(register_user))
         .route("/users/count", get(user_count))
         .route("/users/:stellar_address", get(get_user_by_stellar))

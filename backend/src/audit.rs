@@ -1,5 +1,13 @@
 // Audit trail endpoints (MVP)
 // Reads append-only `approvals` rows and returns a chronological event list.
+//
+// The auditor **no longer triggers on-chain transactions via the backend**.
+// The user (auditor) signs the certificate issuance transaction in Freighter.
+// The backend only:
+//   1. Stores the auditor's approval and decision in the database
+//   2. Accepts the on-chain transaction hash submitted by the frontend
+//   3. Verifies the transaction succeeded on the network
+//   4. Updates the record status
 
 use axum::{
     extract::{Path, State},
@@ -8,13 +16,11 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
 use uuid::Uuid;
 
-use sha2::{Digest, Sha256};
-
-use crate::{soroban_client::SorobanClient, AppState, MaintenanceResponse};
+use crate::{AppState, MaintenanceResponse};
 
 #[derive(Debug, Serialize)]
 pub struct AuditEvent {
@@ -37,6 +43,7 @@ pub struct AuditResponse {
 #[derive(Debug, Deserialize)]
 pub struct ApproveAuditorRequest {
     pub decision_note: Option<String>,
+    pub transaction_hash: Option<String>,  // On-chain tx hash from user's Freighter signing
 }
 
 fn row_to_event(row: sqlx::postgres::PgRow) -> AuditEvent {
@@ -53,7 +60,7 @@ fn row_to_event(row: sqlx::postgres::PgRow) -> AuditEvent {
 }
 
 async fn get_maintenance_for_audit(
-    db: &PgPool,
+    db: &sqlx::PgPool,
     id: Uuid,
 ) -> Result<MaintenanceResponse, StatusCode> {
     let row = sqlx::query(
@@ -67,7 +74,7 @@ async fn get_maintenance_for_audit(
             created_at as created_at
         from maintenance_records
         where id = $1
-        "#,
+        "#
     )
     .bind(id)
     .fetch_one(db)
@@ -106,7 +113,7 @@ pub async fn get_audit_trail(
         from approvals
         where maintenance_id = $1
         order by approval_timestamp asc, id asc
-        "#,
+        "#
     )
     .bind(id)
     .fetch_all(&state.db)
@@ -130,6 +137,7 @@ pub async fn approve_by_auditor(
     Json(req): Json<ApproveAuditorRequest>,
 ) -> Result<Json<MaintenanceResponse>, (StatusCode, String)> {
     let note = req.decision_note;
+    let tx_hash = req.transaction_hash;
 
     // 1. Verify supervisor approved (read-only DB check)
     let supervisor_approved: (i64,) = sqlx::query_as(
@@ -144,53 +152,57 @@ pub async fn approve_by_auditor(
         return Err((StatusCode::CONFLICT, "Supervisor has not approved this record yet".to_string()));
     }
 
-    // 2. Compute cert hash
-    let mut hasher = Sha256::new();
-    hasher.update(id.as_bytes());
-    let cert_hash_bytes: [u8; 32] = hasher.finalize().into();
+    // 2. If a transaction hash was provided by the frontend, verify it on-chain
+    if let Some(ref tx_hash) = tx_hash {
+        let client = crate::soroban_client::SorobanClient::new();
+        // The frontend should have submitted issue_certificate via Freighter.
+        // We verify the transaction exists and succeeded.
+        let caller = "user_via_freighter"; // We trust the user submitted via their wallet
+        let verified = client.verify_transaction(tx_hash, caller).await
+            .map_err(|e| {
+                tracing::error!("on-chain transaction verification failed for tx={tx_hash}: {e:?}");
+                (StatusCode::BAD_GATEWAY, "Failed to verify on-chain transaction".to_string())
+            })?;
 
-    // 3. BLOCKCHAIN-FIRST: Issue certificate on-chain BEFORE writing to DB.
-    //    We call SorobanClient::issue_certificate directly instead of
-    //    transition_to_compliant, because that function checks for auditor
-    //    approval in the DB which hasn't been inserted yet.
-    let client = SorobanClient::new();
-    let tx_id = client
-        .issue_certificate(id.as_bytes(), &cert_hash_bytes)
-        .await
-        .map_err(|e| {
-            let msg = format!("on-chain certificate issuance failed for maintenance_id={}: {:?}", id, e);
-            tracing::error!("{}", msg);
-            (StatusCode::BAD_GATEWAY, msg)
-        })?;
+        if !verified {
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                format!("Transaction {tx_hash} was not found or did not succeed on the Stellar network")
+            ));
+        }
 
-    // 4. On-chain succeeded — now record auditor approval AND update status in DB
+        tracing::info!("audit: on-chain transaction {tx_hash} verified successfully");
+    }
+
+    // 3. Record auditor approval in DB
     sqlx::query(
         r#"
-        insert into approvals (maintenance_id, approver_id, role, decision, approval_timestamp, note)
-        values ($1, $2, 'AUDITOR', 'APPROVED', now(), $3)
-        "#,
+        insert into approvals (maintenance_id, approver_id, role, decision, approval_timestamp, note, on_chain_tx_id)
+        values ($1, $2, 'AUDITOR', 'APPROVED', now(), $3, $4)
+        "#
     )
     .bind(id)
     .bind(Uuid::nil())
     .bind(note)
+    .bind(tx_hash.as_deref())
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // 5. Update record status to COMPLIANT with the on-chain tx hash
+    // 4. Update record status to COMPLIANT
     sqlx::query(
         r#"
         update maintenance_records
         set status = 'COMPLIANT',
             tx_id = $2
         where id = $1
-        "#,
+        "#
     )
     .bind(id)
-    .bind(&tx_id)
+    .bind(tx_hash.as_deref())
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("status update failed after on-chain success: {e}")))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("status update failed: {e}")))?;
 
     let row = sqlx::query(
         r#"
@@ -203,7 +215,7 @@ pub async fn approve_by_auditor(
             created_at as created_at
         from maintenance_records
         where id = $1
-        "#,
+        "#
     )
     .bind(id)
     .fetch_one(&state.db)

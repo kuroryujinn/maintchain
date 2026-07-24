@@ -57,6 +57,13 @@ async function simulateContract(contractId, method, args) {
       const bytes = Buffer.from(clean, 'hex');
       return xdr.ScVal.scvBytes(bytes);
     }
+    if (typeof a === 'object' && a?._type === 'address') {
+      return nativeToScVal(a.address || a.toString());
+    }
+    // Pass through existing ScVal objects
+    if (a && typeof a === 'object' && a.switch) {
+      return a;
+    }
     return nativeToScVal(a);
   });
 
@@ -83,14 +90,15 @@ async function simulateContract(contractId, method, args) {
 
 async function main() {
   checkEnv();
+  const deployerAddress = Keypair.fromSecret(DEPLOYER_SECRET).publicKey();
   console.log('\n=== MaintChain Integration Tests ===\n');
 
-  // ── Test 1: Equipment Registration ──
+  // ── Test 1: Equipment Registration (read-only) ──
   console.log('📋 Equipment Registry:');
   const equipSim = await simulateContract(CONTRACT_IDS.equipment, 'get_equipment', [TEST_EQUIPMENT_ID]);
   assert(equipSim !== null, 'get_equipment simulation succeeded');
 
-  // ── Test 2: Maintenance Record ──
+  // ── Test 2: Maintenance Record (read-only) ──
   console.log('\n📋 Maintenance Records:');
   const recordSim = await simulateContract(CONTRACT_IDS.maintenance, 'get_record', [TEST_MAINTENANCE_ID]);
   assert(recordSim !== null, 'get_record simulation succeeded');
@@ -103,11 +111,14 @@ async function main() {
   // ── Test 3: Multi-Party Approval ──
   console.log('\n📋 Multi-Party Approval:');
 
-  // Simulate approve_by_technician
-  const techSim = await simulateContract(CONTRACT_IDS.approval, 'approve_by_technician', [TEST_MAINTENANCE_ID]);
+  // Simulate approve_by_technician with caller address
+  const techSim = await simulateContract(CONTRACT_IDS.approval, 'approve_by_technician', [
+    TEST_MAINTENANCE_ID,
+    deployerAddress,
+  ]);
   assert(techSim !== null, 'approve_by_technician simulation succeeded');
 
-  // Simulate verify — should fail since only tech approved
+  // Simulate verify — should fail since only tech approved (no supervisor yet)
   const verifySim1 = await simulateContract(CONTRACT_IDS.approval, 'verify', [TEST_MAINTENANCE_ID]);
   assert(verifySim1 !== null, 'verify simulation succeeded (before supervisor)');
 
@@ -119,9 +130,13 @@ async function main() {
   // ── Test 5: Event Emission ──
   console.log('\n📋 Event Emission:');
 
-  // Simulate approve_by_supervisor to trigger events
+  // Simulate approve_by_supervisor with caller address + decision
   const decision = '0x0000000000000000000000000000000000000000000000000000000000000001';
-  const supSim = await simulateContract(CONTRACT_IDS.approval, 'approve_by_supervisor', [TEST_MAINTENANCE_ID, decision]);
+  const supSim = await simulateContract(CONTRACT_IDS.approval, 'approve_by_supervisor', [
+    TEST_MAINTENANCE_ID,
+    decision,
+    deployerAddress,
+  ]);
   assert(supSim !== null, 'approve_by_supervisor simulation succeeded (triggers approval event)');
 
   // ── Test Results ──

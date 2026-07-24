@@ -9,4 +9,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 soroban-sdk = "26.1.0"
 
-
+[dev-dependencies]
+soroban-sdk = { version = "26.1.0", features = ["testutils"] }
+multi-party-approval = { path = "../multi-party-approval" }
+maintenance-records = { path = "../maintenance-records" }

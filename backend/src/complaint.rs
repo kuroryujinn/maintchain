@@ -1,15 +1,23 @@
-//! Compliance verification / issuance (Decentralized implementation)
+//! Compliance verification (Backend verify-only)
 //!
-//! Backend acts as a facilitator between the UI + database and Soroban contracts.
-//! Uses soroban_client to verify eligibility and issue certificates on-chain.
+//! Backend acts as a read-only verifier between the UI + database and Soroban contracts.
+//! Uses soroban_client to verify eligibility on-chain.
+//!
+//! The backend NEVER signs or submits transactions. All state-changing
+//! operations on the blockchain are performed by the user's Freighter wallet.
 
-use axum::http::StatusCode;
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
+use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
-use sha2::{Digest, Sha256};
 use tracing::{info, error};
 
 use crate::soroban_client::SorobanClient;
+use crate::AppState;
 
 /// Check whether the maintenance record is eligible for compliance
 /// by verifying both a SUPERVISOR and an AUDITOR have approved in the database.
@@ -43,81 +51,66 @@ pub async fn is_eligible_for_compliance(
     let db_eligible = supervisor_approved.0 > 0 && auditor_approved.0 > 0;
     if !db_eligible {
         info!(
-            "maintenance_id={} not eligible: supervisor_approved={}, auditor_approved={}",
-            maintenance_id, supervisor_approved.0, auditor_approved.0
+            "maintenance_id={maintenance_id} not eligible: supervisor_approved={}, auditor_approved={}",
+            supervisor_approved.0, auditor_approved.0
         );
         return Ok(false);
     }
 
-    // Verify on-chain via Soroban. Failure propagates — no silent fallback.
+    // Verify on-chain via Soroban (read-only simulation). Failure propagates.
     let client = SorobanClient::new();
     match client.verify_compliance(maintenance_id.as_bytes()).await {
         Ok(true) => {
-            info!("maintenance_id={} verified on-chain", maintenance_id);
+            info!("maintenance_id={maintenance_id} verified on-chain");
             Ok(true)
         }
         Ok(false) => {
-            info!("maintenance_id={} NOT verified on-chain (approval mismatch)", maintenance_id);
+            info!("maintenance_id={maintenance_id} NOT verified on-chain (approval mismatch)");
             Ok(false)
         }
         Err(e) => {
-            error!("maintenance_id={} on-chain verification failed: {:?}", maintenance_id, e);
+            error!("maintenance_id={maintenance_id} on-chain verification failed: {e:?}");
             Err(e)
         }
     }
 }
 
-/// Transition record to COMPLIANT by triggering the on-chain attestation.
-/// Calls ComplianceAttestation.issue_certificate via the Soroban client.
-/// Only updates the database AFTER the on-chain transaction confirms.
-pub async fn transition_to_compliant(
-    db: &PgPool,
-    maintenance_id: Uuid,
-) -> Result<(), StatusCode> {
-    // 1. Verify on-chain eligibility
-    let eligible = is_eligible_for_compliance(db, maintenance_id).await?;
-    if !eligible {
-        info!("maintenance_id={} not eligible for compliance", maintenance_id);
-        return Err(StatusCode::CONFLICT);
+#[derive(Debug, Serialize)]
+pub struct EligibilityResponse {
+    pub maintenance_id: Uuid,
+    pub eligible: bool,
+    pub on_chain_verified: bool,
+}
+
+/// GET /compliance/eligible/:id — check if a maintenance record is eligible for compliance certification.
+/// Verifies both supervisor and auditor approvals in the database and on-chain via Soroban.
+pub async fn check_eligibility(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<EligibilityResponse>, (StatusCode, String)> {
+    info!("check_eligibility: maintenance_id={id}");
+
+    match is_eligible_for_compliance(&state.db, id).await {
+        Ok(true) => {
+            info!("maintenance_id={id} is eligible for compliance certification");
+            Ok(Json(EligibilityResponse {
+                maintenance_id: id,
+                eligible: true,
+                on_chain_verified: true,
+            }))
+        }
+        Ok(false) => {
+            info!("maintenance_id={id} is NOT eligible for compliance certification");
+            Ok(Json(EligibilityResponse {
+                maintenance_id: id,
+                eligible: false,
+                on_chain_verified: false,
+            }))
+        }
+        Err(status) => {
+            let msg = format!("eligibility check failed for maintenance_id={id}");
+            error!("{msg}");
+            Err((status, msg))
+        }
     }
-
-    // 2. Compute cert hash from maintenance_id
-    let mut hasher = Sha256::new();
-    hasher.update(maintenance_id.as_bytes());
-    let cert_hash_bytes: [u8; 32] = hasher.finalize().into();
-
-    // 3. Issue certificate on-chain via Soroban — this MUST succeed before DB write
-    let client = SorobanClient::new();
-    let id_bytes = maintenance_id.as_bytes();
-
-    let tx_id = client
-        .issue_certificate(id_bytes, &cert_hash_bytes)
-        .await
-        .map_err(|e| {
-            error!("soroban issue_certificate failed: {:?}", e);
-            StatusCode::BAD_GATEWAY
-        })?;
-
-    info!("maintenance_id={} transitioned to COMPLIANT, tx_id={}", maintenance_id, tx_id);
-
-    // 4. Update local database AFTER on-chain confirmation
-    sqlx::query(
-        r#"
-        update maintenance_records
-        set status = 'COMPLIANT',
-            tx_id = $2
-        where id = $1
-        "#,
-    )
-    .bind(maintenance_id)
-    .bind(&tx_id)
-    .execute(db)
-    .await
-    .map_err(|e| {
-        error!("maintenance_id={} DB update after on-chain success failed: {e}", maintenance_id);
-        // On-chain tx already confirmed — queue a recovery job
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(())
 }

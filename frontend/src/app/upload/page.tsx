@@ -62,7 +62,7 @@ export default function EvidenceUpload() {
         const txResult = await callContract(
           MAINTENANCE_RECORDS_ID,
           'submit_evidence',
-          [idBytes32, hash.evidence_hash]
+          [idBytes32, hash.evidence_hash, address]
         );
 
         txStateMachine.transition(TxState.CONFIRMED, { hash: txResult.transactionHash });

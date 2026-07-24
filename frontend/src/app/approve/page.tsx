@@ -43,7 +43,9 @@ export default function ApprovalCenter() {
     setLoading(true);
     api.listPendingApprovals()
       .then(setRecords)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load pending approvals:', err);
+      })
       .finally(() => setLoading(false));
   }, [isConnected]);
 
@@ -73,7 +75,7 @@ export default function ApprovalCenter() {
         const txResult = await callContract(
           MULTI_PARTY_APPROVAL_ID,
           'approve_by_supervisor',
-          [idBytes32, decisionHex]
+          [idBytes32, decisionHex, address]
         );
         const onChainTx = txResult.transactionHash;
 
@@ -124,7 +126,7 @@ export default function ApprovalCenter() {
         const txResult = await callContract(
           MULTI_PARTY_APPROVAL_ID,
           'reject_by_supervisor',
-          [idBytes32]
+          [idBytes32, address]
         );
         const onChainTx = txResult.transactionHash;
 

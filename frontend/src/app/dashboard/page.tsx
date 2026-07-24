@@ -28,8 +28,9 @@ export default function DashboardPage() {
           const data = await res.json();
           setCompliance(data);
         }
-      } catch {
-        // Backend unavailable — show empty state
+      } catch (e) {
+        console.error('Failed to fetch compliance dashboard:', e);
+        // Backend unavailable — dashboard shows zeros
       } finally {
         setLoading(false);
       }

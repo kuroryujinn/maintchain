@@ -289,6 +289,8 @@ dependencies = [
 name = "compliance-attestation"
 version = "0.1.0"
 dependencies = [
+ "maintenance-records",
+ "multi-party-approval",
  "soroban-sdk",
 ]
 

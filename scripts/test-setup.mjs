@@ -2,6 +2,9 @@
 // Creates test data for integration tests.
 // Run: node scripts/test-setup.mjs
 // Requires: SOROBAN_RPC_URL, DEPLOYER_SECRET_KEY, and all CONTRACT_ID env vars.
+//
+// NOTE: DEPLOYER_SECRET_KEY is only used here for one-time test data creation,
+// not for production runtime. The production backend never signs transactions.
 
 import { Keypair, Contract, TransactionBuilder, Networks, BASE_FEE,
   SorobanDataBuilder, xdr, nativeToScVal, Memo } from '@stellar/stellar-sdk';
@@ -29,9 +32,28 @@ function checkEnv() {
   }
 }
 
+/**
+ * Generate a unique 32-byte hex ID for test data.
+ * Format: 0x + 24 zero-padded prefix + 8 hex chars from random UUID.
+ */
 function testId(prefix) {
-  const random = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
-  return `0x0000000000000000${prefix}${random}`;
+  const random = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  return `0x000000000000000000000000${prefix}${random}`;
+}
+
+/**
+ * Generate a metadata hash (32-byte hex value with 0x prefix).
+ */
+function testMetadataHash() {
+  const random = crypto.randomUUID().replace(/-/g, '');
+  return `0x${random}${random}${random}`.slice(0, 66);
+}
+
+/**
+ * Convert a hex string to a Soroban address ScVal (for contract IDs).
+ */
+function addressToScVal(addr) {
+  return nativeToScVal(addr || '');
 }
 
 async function invokeContract(contractId, method, args, secretKey) {
@@ -45,7 +67,8 @@ async function invokeContract(contractId, method, args, secretKey) {
       const bytes = Buffer.from(clean, 'hex');
       return xdr.ScVal.scvBytes(bytes);
     }
-    return nativeToScVal(a);
+    // Pass through existing ScVal objects (like addresses from nativeToScVal)
+    return a;
   });
 
   const op = contract.call(method, ...scvalArgs);
@@ -119,23 +142,31 @@ async function main() {
   console.log('Deployer:', Keypair.fromSecret(DEPLOYER_SECRET).publicKey());
   console.log('Contract IDs:', CONTRACT_IDS);
 
+  const deployerAddress = Keypair.fromSecret(DEPLOYER_SECRET).publicKey();
   const equipmentId = testId('EQ');
+  const metadataHash = testMetadataHash();
   const maintenanceId = testId('MA');
   const certHash = testId('CE');
 
   console.log('\n--- Creating test equipment ---');
+  console.log('  Contract API: register_equipment(equipment_id, owner, metadata_hash)');
+  console.log(`  Owner: ${deployerAddress} (require_auth via deployer key)`);
   const equipResult = await invokeContract(CONTRACT_IDS.equipment, 'register_equipment', [
     equipmentId,
-    '0x0000000000000000000000000000000000000000000000000000000000000001' // owner
+    nativeToScVal(deployerAddress),  // owner (require_auth)
+    metadataHash,
   ], DEPLOYER_SECRET);
   console.log('Equipment registration:', equipResult.status);
   console.log('Equipment ID:', equipmentId);
+  console.log('Metadata hash:', metadataHash);
 
   console.log('\n--- Creating test maintenance record ---');
+  console.log('  Contract API: create_record(maintenance_id, equipment_id, tech_id)');
+  console.log(`  Technician: ${deployerAddress} (require_auth via deployer key)`);
   const maintResult = await invokeContract(CONTRACT_IDS.maintenance, 'create_record', [
     maintenanceId,
     equipmentId,
-    nativeToScVal(Keypair.fromSecret(DEPLOYER_SECRET).publicKey())
+    nativeToScVal(deployerAddress),  // tech_id (require_auth)
   ], DEPLOYER_SECRET);
   console.log('Maintenance record creation:', maintResult.status);
   console.log('Maintenance ID:', maintenanceId);
@@ -145,6 +176,8 @@ async function main() {
   console.log(`export TEST_EQUIPMENT_ID="${equipmentId}"`);
   console.log(`export TEST_MAINTENANCE_ID="${maintenanceId}"`);
   console.log(`export TEST_CERT_HASH="${certHash}"`);
+  console.log(`export TEST_METADATA_HASH="${metadataHash}"`);
+  console.log(`export DEPLOYER_ADDRESS="${deployerAddress}"`);
 }
 
 main().catch(e => {

@@ -23,11 +23,11 @@ services:
       # Stellar network passphrase for transaction signing
       - key: SOROBAN_NETWORK_PASSPHRASE
         sync: false
-      # Deployer secret key (S...) — for signing on-chain transactions
-      # Set this in Render Dashboard → Environment Variables
-      - key: DEPLOYER_SECRET_KEY
-        sync: false
-      # Deployed Soroban contract IDs
+      # ── Deployed Soroban Contract IDs ──
+      # Set these in Render Dashboard → Environment Variables
+      # NOTE: No secret key is needed — the backend only does read-only
+      # contract simulations (no signing). All blockchain transactions
+      # are signed by users' Freighter wallets via the frontend.
       - key: APPROVAL_CONTRACT_ID
         sync: false
       - key: RECORDS_CONTRACT_ID

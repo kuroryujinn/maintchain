@@ -104,8 +104,9 @@ export default function AuditTimeline() {
       try {
         const data = await api.getAuditTrail('REC-DE-4471');
         setAuditData(data);
-      } catch {
-        // Fall back to empty state if backend unavailable
+      } catch (e) {
+        console.error('Failed to load audit trail:', e);
+        // Leave auditData as null — shows static fallback timeline
       } finally {
         setAuditLoading(false);
       }
@@ -145,8 +146,8 @@ export default function AuditTimeline() {
     try {
       const data = await api.getAuditTrail('REC-DE-4471');
       setAuditData(data);
-    } catch {
-      // Silently fail — the timeline already shows the latest state
+    } catch (e) {
+      console.error('Failed to refresh audit trail:', e);
     }
   };
 
@@ -209,9 +210,11 @@ export default function AuditTimeline() {
         txStateMachine.transition(TxState.CONFIRMED, { hash: onChainTx });
 
         // On-chain succeeded — now record auditor approval in backend (DB mirror)
+        // Send the on-chain transaction hash so the backend can verify it
         txStateMachine.transition(TxState.DATABASE_SYNC);
         const result = await api.auditorApprove(maintenanceId, {
           decision_note: decisionNote,
+          transaction_hash: onChainTx,
         });
 
         txStateMachine.transition(TxState.COMPLETE, { hash: onChainTx });

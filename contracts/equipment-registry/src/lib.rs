@@ -19,7 +19,6 @@ pub struct EquipmentSnapshot {
 pub struct EquipmentRegistry;
 
 fn append_str(out: Bytes, s: &str) -> Bytes {
-    // In this SDK version, Bytes::append mutates in-place and returns ()
     let b = Bytes::from_slice(out.env(), s.as_bytes());
     let mut out2 = out;
     out2.append(&b);
@@ -62,20 +61,15 @@ fn canonical_equipment_preimage(
     created_at: u64,
     version: u32,
 ) -> Bytes {
-    // SEP || equipment_id || metadata_hash || created_at || version
     let out = Bytes::new(env);
-
     let out2 = append_str(out, EQUIPMENT_SEP);
-
     let eq_id_bytes: Bytes = equipment_id.to_bytes();
     let md_bytes: Bytes = metadata_hash.to_bytes();
-
     let mut out3 = out2;
     out3.append(&eq_id_bytes);
     out3.append(&md_bytes);
     out3.append(&u64_be(env, created_at));
     out3.append(&u32_be(env, version));
-
     out3
 }
 
@@ -88,24 +82,24 @@ fn compute_equipment_hash(
     version: u32,
 ) -> BytesN<32> {
     let preimage = canonical_equipment_preimage(
-        env,
-        equipment_id,
-        owner,
-        metadata_hash,
-        created_at,
-        version,
+        env, equipment_id, owner, metadata_hash, created_at, version,
     );
     sha256(env, &preimage)
 }
 
 #[contractimpl]
 impl EquipmentRegistry {
+    /// Register new equipment.
+    /// The `owner` address must authorize this call (via require_auth).
     pub fn register_equipment(
         env: Env,
         equipment_id: BytesN<32>,
         owner: Address,
         metadata_hash: BytesN<32>,
     ) -> BytesN<32> {
+        // Authorization: the owner must sign the transaction
+        owner.require_auth();
+
         if env.storage().instance().has(&equipment_id) {
             panic!("Equipment already registered");
         }
@@ -132,7 +126,12 @@ impl EquipmentRegistry {
         eq_hash
     }
 
-    pub fn update_owner(env: Env, equipment_id: BytesN<32>, new_owner: Address) -> BytesN<32> {
+    /// Transfer equipment ownership.
+    /// Only the current owner can transfer.
+    pub fn update_owner(env: Env, equipment_id: BytesN<32>, new_owner: Address, caller: Address) -> BytesN<32> {
+        // Authorization: the current owner must sign
+        caller.require_auth();
+
         let latest_version: u32 = env
             .storage()
             .instance()
@@ -148,15 +147,14 @@ impl EquipmentRegistry {
             .get(&prev_key)
             .expect("Equipment snapshot missing");
 
+        if caller != prev.owner {
+            panic!("Only the equipment owner can transfer ownership");
+        }
+
         let new_version = latest_version + 1;
         let created_at = env.ledger().timestamp();
         let eq_hash = compute_equipment_hash(
-            &env,
-            &equipment_id_key,
-            &new_owner,
-            &prev.metadata_hash,
-            created_at,
-            new_version,
+            &env, &equipment_id_key, &new_owner, &prev.metadata_hash, created_at, new_version,
         );
 
         let snap = EquipmentSnapshot {
@@ -189,71 +187,47 @@ impl EquipmentRegistry {
         let key = (equipment_id, version);
         env.storage().instance().get(&key).expect("Equipment version not found")
     }
-}
-
-#[cfg(test)]
+}#[cfg(test)]
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Ledger as _;
 
-
-
-
-
     fn owner_a(env: &Env) -> Address {
         Address::generate(env)
     }
-
-
-
-
 
     fn owner_b(env: &Env) -> Address {
         Address::generate(env)
     }
 
-
-
-
-    fn owner_default(env: &Env) -> Address {
-        Address::generate(env)
-    }
-
-
-
     #[test]
     fn test_register_equipment_stores_snapshot() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register(EquipmentRegistry, ());
         env.ledger().set_timestamp(1234);
 
-
         let equipment_id: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
-        let owner: Address = owner_default(&env);
+        let owner: Address = owner_a(&env);
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[2u8; 32]);
 
-        env.as_contract(&contract_id, || {
-            let eq_hash = EquipmentRegistry::register_equipment(
-                env.clone(),
-                equipment_id.clone(),
-                owner.clone(),
-                metadata_hash.clone(),
-            );
+        let client = crate::EquipmentRegistryClient::new(&env, &contract_id);
+        let eq_hash = client.register_equipment(&equipment_id, &owner, &metadata_hash);
 
-            let snap = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
-            assert_eq!(snap.equipment_id, equipment_id);
-            assert_eq!(snap.owner, owner);
-            assert_eq!(snap.metadata_hash, metadata_hash);
-            assert_eq!(snap.equipment_hash, eq_hash);
-            assert_eq!(snap.version, 1);
-            assert!(snap.created_at > 0);
-        });
+        let snap = client.get_equipment(&equipment_id);
+        assert_eq!(snap.equipment_id, equipment_id);
+        assert_eq!(snap.owner, owner);
+        assert_eq!(snap.metadata_hash, metadata_hash);
+        assert_eq!(snap.equipment_hash, eq_hash);
+        assert_eq!(snap.version, 1);
+        assert!(snap.created_at > 0);
     }
 
     #[test]
     fn test_get_equipment_returns_latest_version() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register(EquipmentRegistry, ());
 
         let equipment_id: BytesN<32> = BytesN::from_array(&env, &[3u8; 32]);
@@ -261,24 +235,19 @@ mod tests {
         let owner2: Address = owner_b(&env);
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[6u8; 32]);
 
-        env.as_contract(&contract_id, || {
-            let _ = EquipmentRegistry::register_equipment(
-                env.clone(),
-                equipment_id.clone(),
-                owner1.clone(),
-                metadata_hash.clone(),
-            );
-            let _ = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
+        let client = crate::EquipmentRegistryClient::new(&env, &contract_id);
+        let _ = client.register_equipment(&equipment_id, &owner1, &metadata_hash);
+        let _ = client.update_owner(&equipment_id, &owner2, &owner1);
 
-            let latest = EquipmentRegistry::get_equipment(env.clone(), equipment_id.clone());
-            assert_eq!(latest.owner, owner2);
-            assert_eq!(latest.version, 2);
-        });
+        let latest = client.get_equipment(&equipment_id);
+        assert_eq!(latest.owner, owner2);
+        assert_eq!(latest.version, 2);
     }
 
     #[test]
     fn test_update_owner_creates_new_version_snapshot() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register(EquipmentRegistry, ());
 
         let equipment_id: BytesN<32> = BytesN::from_array(&env, &[7u8; 32]);
@@ -286,29 +255,22 @@ mod tests {
         let owner2: Address = owner_b(&env);
         let metadata_hash: BytesN<32> = BytesN::from_array(&env, &[11u8; 32]);
 
-        env.as_contract(&contract_id, || {
-            let h1 = EquipmentRegistry::register_equipment(
-                env.clone(),
-                equipment_id.clone(),
-                owner1.clone(),
-                metadata_hash.clone(),
-            );
-            let h2 = EquipmentRegistry::update_owner(env.clone(), equipment_id.clone(), owner2.clone());
-            assert_ne!(h1, h2);
+        let client = crate::EquipmentRegistryClient::new(&env, &contract_id);
+        let h1 = client.register_equipment(&equipment_id, &owner1, &metadata_hash);
+        let h2 = client.update_owner(&equipment_id, &owner2, &owner1);
+        assert_ne!(h1, h2);
 
-            let v1 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 1);
-            let v2 = EquipmentRegistry::get_equipment_version(env.clone(), equipment_id.clone(), 2);
+        let v1 = client.get_equipment_version(&equipment_id, &1);
+        let v2 = client.get_equipment_version(&equipment_id, &2);
 
-            assert_eq!(v1.owner, owner1);
-            assert_eq!(v1.metadata_hash, metadata_hash);
-            assert_eq!(v1.equipment_hash, h1);
-            assert_eq!(v1.version, 1);
+        assert_eq!(v1.owner, owner1);
+        assert_eq!(v1.metadata_hash, metadata_hash);
+        assert_eq!(v1.equipment_hash, h1);
+        assert_eq!(v1.version, 1);
 
-            assert_eq!(v2.owner, owner2);
-            assert_eq!(v2.metadata_hash, metadata_hash);
-            assert_eq!(v2.equipment_hash, h2);
-            assert_eq!(v2.version, 2);
-        });
+        assert_eq!(v2.owner, owner2);
+        assert_eq!(v2.metadata_hash, metadata_hash);
+        assert_eq!(v2.equipment_hash, h2);
+        assert_eq!(v2.version, 2);
     }
 }
-

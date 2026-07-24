@@ -12,6 +12,7 @@ import {
   SorobanDataBuilder,
   xdr,
   Memo,
+  Address,
 } from '@stellar/stellar-sdk';
 
 const SOROBAN_RPC_URL =
@@ -165,8 +166,16 @@ export async function invokeContract(
 
 /**
  * Convert JS values to Soroban ScVal for contract calls.
+ * Handles Stellar addresses (G... / C...) properly by creating Address ScVals.
  */
 export function toScVal(value: string | number | boolean): xdr.ScVal {
+  // Detect Stellar addresses (G... for accounts, C... for contracts)
+  if (typeof value === 'string') {
+    if ((value.startsWith('G') && value.length === 56) ||
+        (value.startsWith('C') && value.length === 56)) {
+      return new Address(value).toScVal();
+    }
+  }
   return nativeToScVal(value);
 }
 

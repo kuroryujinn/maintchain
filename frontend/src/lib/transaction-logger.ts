@@ -48,8 +48,9 @@ export function addTxLogEvent(event: Omit<TxLogEvent, 'id' | 'timestamp'>) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(event),
-  }).catch(() => {
-    // Silently fail — localStorage is the fallback
+  }).catch((err) => {
+    // Backend may be unavailable — localStorage is the primary fallback
+    console.warn('Failed to sync tx log to backend:', err);
   });
 }
 

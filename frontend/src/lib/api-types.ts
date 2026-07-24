@@ -55,6 +55,11 @@ export interface SupervisorDecisionRequest {
   decision_note?: string;
 }
 
+export interface ApproveAuditorRequest {
+  decision_note?: string;
+  transaction_hash?: string;
+}
+
 // ─── Audit ────────────────────────────────────────────────────
 
 export interface AuditEvent {

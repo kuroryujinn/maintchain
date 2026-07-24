@@ -66,8 +66,9 @@ export const useSoroban = () => {
         setAddress(persisted);
         setIsConnected(true);
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      // localStorage may be unavailable in some environments
+      console.warn('Failed to read persisted wallet address:', e);
     }
   }, []);
 
@@ -76,8 +77,8 @@ export const useSoroban = () => {
       if (!next) localStorage.removeItem(FREIGHTER_LOCAL_KEY);
       else localStorage.setItem(FREIGHTER_LOCAL_KEY, next);
       window.dispatchEvent(new Event(WALLET_CHANGED_EVENT));
-    } catch {
-      // ignore
+    } catch (e) {
+      console.warn('Failed to persist wallet address:', e);
     }
   }, []);
 
@@ -143,7 +144,8 @@ export const useSoroban = () => {
         message: 'Unable to verify Freighter network. Continue only if you are on Stellar Testnet.',
       });
       return false;
-    } catch {
+    } catch (e) {
+      console.error('Network verification error:', e);
       setNetworkOk(false);
       setNetworkError({
         message: 'Failed to verify network. Please reconnect on Stellar Testnet.',

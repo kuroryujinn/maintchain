@@ -116,7 +116,7 @@ export const api = {
   getAuditTrail: (id: string) =>
     request<AuditResponse>(`/maintenance/${encodeURIComponent(id)}/audit`),
 
-  auditorApprove: (id: string, data: { decision_note?: string }) =>
+  auditorApprove: (id: string, data: import('./api-types').ApproveAuditorRequest) =>
     request<MaintenanceResponse>(`/maintenance/${encodeURIComponent(id)}/approvals/auditor`, {
       method: 'POST',
       body: JSON.stringify(data),

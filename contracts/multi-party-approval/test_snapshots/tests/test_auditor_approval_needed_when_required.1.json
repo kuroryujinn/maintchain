@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 3,
+    "address": 4,
     "nonce": 0,
     "mux_id": 0
   },
@@ -13,16 +13,16 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "register_equipment",
+              "function_name": "set_auditor_required",
               "args": [
                 {
-                  "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
+                  "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
+                },
+                {
+                  "bool": true
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "bytes": "0606060606060606060606060606060606060606060606060606060606060606"
                 }
               ]
             }
@@ -38,16 +38,61 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "update_owner",
+              "function_name": "approve_by_technician",
               "args": [
                 {
-                  "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "approve_by_supervisor",
+              "args": [
+                {
+                  "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
+                },
+                {
+                  "bytes": "0100000000000000000000000000000000000000000000000000000000000000"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "approve_by_auditor",
+              "args": [
+                {
+                  "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 }
               ]
             }
@@ -85,124 +130,37 @@
                   "storage": [
                     {
                       "key": {
-                        "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
-                      },
-                      "val": {
-                        "u32": 2
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
-                          },
-                          {
-                            "u32": 1
-                          }
-                        ]
+                        "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
                       },
                       "val": {
                         "map": [
                           {
                             "key": {
-                              "symbol": "created_at"
+                              "symbol": "auditor"
                             },
                             "val": {
-                              "u64": "0"
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                             }
                           },
                           {
                             "key": {
-                              "symbol": "equipment_hash"
+                              "symbol": "auditor_approved"
                             },
                             "val": {
-                              "bytes": "07076a89a0824ced6d9a3f78ba8ba62339dc7b7844cd797a99c0a2d589699e55"
+                              "bool": true
                             }
                           },
                           {
                             "key": {
-                              "symbol": "equipment_id"
+                              "symbol": "auditor_required"
                             },
                             "val": {
-                              "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
+                              "bool": true
                             }
                           },
                           {
                             "key": {
-                              "symbol": "metadata_hash"
-                            },
-                            "val": {
-                              "bytes": "0606060606060606060606060606060606060606060606060606060606060606"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "owner"
-                            },
-                            "val": {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "version"
-                            },
-                            "val": {
-                              "u32": 1
-                            }
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
-                          },
-                          {
-                            "u32": 2
-                          }
-                        ]
-                      },
-                      "val": {
-                        "map": [
-                          {
-                            "key": {
-                              "symbol": "created_at"
-                            },
-                            "val": {
-                              "u64": "0"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "equipment_hash"
-                            },
-                            "val": {
-                              "bytes": "d291455597229311eaf365bef62dc671e9ab26ee47840ee7e46bb637d8c5e57c"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "equipment_id"
-                            },
-                            "val": {
-                              "bytes": "0303030303030303030303030303030303030303030303030303030303030303"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "metadata_hash"
-                            },
-                            "val": {
-                              "bytes": "0606060606060606060606060606060606060606060606060606060606060606"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "owner"
+                              "symbol": "supervisor"
                             },
                             "val": {
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -210,10 +168,26 @@
                           },
                           {
                             "key": {
-                              "symbol": "version"
+                              "symbol": "supervisor_approved"
                             },
                             "val": {
-                              "u32": 2
+                              "bool": true
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "tech_approved"
+                            },
+                            "val": {
+                              "bool": true
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "technician"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                             }
                           }
                         ]
@@ -258,6 +232,46 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "5541220902715666415"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "1033654523790656264"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "4837995959683129791"
                 }
               },
               "durability": "temporary",
