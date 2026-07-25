@@ -1,7 +1,11 @@
 # ── MaintChain Deploy Pipeline ──
 # Deploys to production on push to main (after CI passes).
-# Frontend → Vercel (auto-deploy via Vercel GitHub integration)
-# Backend → Render.com (via Render Blueprints GitHub integration)
+# - Frontend → Vercel via vercel-deploy action
+# - Backend → Render.com via Deploy Hook webhook
+#
+# Prerequisites:
+#   Frontend: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID in GitHub secrets
+#   Backend:  RENDER_DEPLOY_HOOK_URL in GitHub secrets
 
 name: Deploy
 
@@ -11,24 +15,52 @@ on:
   workflow_dispatch: # Allow manual trigger
 
 jobs:
-  # ─── Verify CI passes first ─────────────────────────
-  verify:
-    name: Verify CI
+  # ─── Deploy Frontend to Vercel ─────────────────────
+  frontend:
+    name: Deploy Frontend (Vercel)
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - run: echo "CI passed — ready to deploy"
 
-  # ─── Notify of deployment ──────────────────────────
-  notify:
-    name: Notify Deployment
-    needs: [verify]
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build (production)
+        run: npm run build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_SOROBAN_RPC_URL: ${{ vars.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org' }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://maintchain-backend.onrender.com' }}
+
+      # Vercel deploy runs from project root (where vercel.json lives), not from frontend/
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+
+  # ─── Deploy Backend to Render ──────────────────────
+  backend:
+    name: Deploy Backend (Render)
     runs-on: ubuntu-latest
+
     steps:
-      - name: Deployment triggered
+      - name: Trigger Render Deploy Hook
         run: |
-          echo "::notice::Deployment triggered for commit ${{ github.sha }}"
-          echo "Frontend: Auto-deployed by Vercel GitHub integration"
-          echo "Backend: Auto-deployed by Render Blueprints GitHub integration"
-          echo "Render Dashboard: https://dashboard.render.com"
-          echo "Vercel Dashboard: https://vercel.com/dashboard"
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK_URL not set — skipping backend deployment"
+            exit 0
+          fi
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "::notice::Render deploy hook triggered successfully"

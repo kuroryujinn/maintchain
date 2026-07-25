@@ -44,3 +44,6 @@ build/
 .idea/frontend/nul
 frontend/nul
 /nul
+.vercel
+.env*
+.worktrees/

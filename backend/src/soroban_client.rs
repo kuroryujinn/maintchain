@@ -307,66 +307,6 @@ impl SorobanClient {
     }
 }
 
-// ── Ed25519 Signature Verification ──
-// These functions are used by the auth module for challenge-response verification.
-
-/// Verify an ed25519 signature using the Stellar public key (G... address).
-pub fn verify_ed25519_signature(
-    stellar_address: &str,
-    message: &[u8],
-    signature_b64: &str,
-) -> Result<bool, StatusCode> {
-    use stellar_strkey::Strkey;
-    use ed25519_dalek::{Verifier, VerifyingKey};
-
-    let strkey = Strkey::from_string(stellar_address).map_err(|e| {
-        error!("soroban_client: invalid stellar address: {e}");
-        StatusCode::BAD_REQUEST
-    })?;
-
-    let pub_key_bytes = match strkey {
-        Strkey::PublicKeyEd25519(pk) => pk.0,
-        _ => return Err(StatusCode::BAD_REQUEST),
-    };
-
-    use base64::Engine as _;
-    let sig_bytes = base64::engine::general_purpose::STANDARD.decode(signature_b64).map_err(|e| {
-        error!("soroban_client: invalid signature base64: {e}");
-        StatusCode::BAD_REQUEST
-    })?;
-
-    let verifying_key = VerifyingKey::from_bytes(&pub_key_bytes).map_err(|e| {
-        error!("soroban_client: invalid public key: {e}");
-        StatusCode::BAD_REQUEST
-    })?;
-
-    let signature = ed25519_dalek::Signature::from_slice(&sig_bytes).map_err(|e| {
-        error!("soroban_client: invalid signature bytes: {e}");
-        StatusCode::BAD_REQUEST
-    })?;
-
-    Ok(verifying_key.verify(message, &signature).is_ok())
-}
-
-/// Generate a session token for a verified wallet.
-pub fn generate_session_token(stellar_address: &str, nonce: &str) -> String {
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
-
-    let server_secret = std::env::var("AUTH_SECRET")
-        .unwrap_or_else(|_| "maintchain-dev-secret".to_string());
-
-    let mut mac = Hmac::<Sha256>::new_from_slice(server_secret.as_bytes())
-        .expect("HMAC key");
-    mac.update(stellar_address.as_bytes());
-    mac.update(nonce.as_bytes());
-    mac.update(b"MaintChainSession");
-
-    let result = mac.finalize();
-    let code_bytes = result.into_bytes();
-    hex::encode(code_bytes)
-}
-
 // ── API Handlers ──
 
 /// GET /compliance/attestation/:id — read attestation state from the ComplianceAttestation contract.

@@ -5,6 +5,7 @@ import {
   getNetwork,
   isConnected as freighterIsConnected,
   requestAccess,
+  signMessage as freighterSignMessage,
   signTransaction as freighterSignTransaction,
 } from '@stellar/freighter-api';
 import {
@@ -37,6 +38,11 @@ export const useSoroban = () => {
 
   const [networkError, setNetworkError] = useState<WalletError>(null);
   const [networkOk, setNetworkOk] = useState<boolean>(true);
+
+  // ── Auth state (option (c) session) ──
+  const [sessionVerified, setSessionVerified] = useState(false);
+  const [sessionVerifying, setSessionVerifying] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   const horizon = useMemo(() => {
     return {
@@ -185,6 +191,104 @@ export const useSoroban = () => {
     }
   }, [address, horizon]);
 
+  // ── Auth: check existing session ──────────────────────────
+
+  const checkSession = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated && data.stellar_address) {
+          setSessionVerified(true);
+          return data.stellar_address;
+        }
+      }
+      setSessionVerified(false);
+      return null;
+    } catch {
+      setSessionVerified(false);
+      return null;
+    }
+  }, []);
+
+  // ── Auth: verify wallet ownership via challenge-response ──
+
+  const verifyWallet = useCallback(async (walletAddress: string): Promise<boolean> => {
+    setSessionVerifying(true);
+    setSessionError(null);
+
+    try {
+      // 1. Request challenge from backend
+      const challengeRes = await fetch('/api/auth/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stellar_address: walletAddress }),
+      });
+
+      if (!challengeRes.ok) {
+        const errBody = await challengeRes.json().catch(() => ({}));
+        throw new Error(errBody?.error?.message || 'Challenge request failed');
+      }
+
+      const { message } = await challengeRes.json();
+
+      // 2. Sign the challenge message with Freighter's signMessage.
+      //    This returns a raw Ed25519 signature over the message bytes,
+      //    which the backend can verify directly using ed25519-dalek.
+      //    (Using signTransaction would send a Stellar transaction XDR,
+      //     which is NOT a raw signature and cannot be verified by the
+      //     backend's verify_challenge handler.)
+      const signed = await freighterSignMessage({ message });
+
+      if (signed.error) {
+        throw new Error(`Signing error: ${signed.error.message}`);
+      }
+      if (!signed.signedMessage) {
+        throw new Error('No signed message returned from Freighter');
+      }
+
+      // 3. Send the raw Ed25519 signature to the proxy (which forwards
+      //    to backend for verification). The proxy will create a session
+      //    cookie on success.
+      const verifyRes = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stellar_address: walletAddress,
+          nonce: message,
+          signature: signed.signedMessage,
+        }),
+      });
+
+      if (!verifyRes.ok) {
+        const errBody = await verifyRes.json().catch(() => ({}));
+        throw new Error(errBody?.error?.message || 'Signature verification failed');
+      }
+
+      setSessionVerified(true);
+      return true;
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setSessionError(msg);
+      setSessionVerified(false);
+      return false;
+    } finally {
+      setSessionVerifying(false);
+    }
+  }, []);
+
+  // ── Auth: clear session on disconnect ──
+
+  const clearSession = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Best-effort — the cookie will expire eventually
+    }
+    setSessionVerified(false);
+    setSessionError(null);
+  }, []);
+
   const connectWallet = useCallback(async () => {
     setWalletError(null);
     setNetworkError(null);
@@ -210,8 +314,9 @@ export const useSoroban = () => {
       await validateNetwork();
       await refreshBalance(authAddress);
 
-      // After wallet connection succeeds, verify ownership
-      await verifyWalletOwnership(authAddress);
+      // After wallet connects, verify ownership via challenge-response
+      // The proxy sets an httpOnly session cookie on success
+      await verifyWallet(authAddress);
     } catch (e: any) {
       setWalletError({
         message: e?.message ? String(e.message) : 'Freighter connection failed.',
@@ -220,7 +325,7 @@ export const useSoroban = () => {
       setAddress(null);
       persistAddress(null);
     }
-  }, [detectFreighter, persistAddress, refreshBalance, validateNetwork]);
+  }, [detectFreighter, persistAddress, refreshBalance, validateNetwork, verifyWallet]);
 
   const disconnectWallet = useCallback(() => {
     setIsConnected(false);
@@ -232,7 +337,10 @@ export const useSoroban = () => {
     setNetworkError(null);
     setNetworkOk(true);
     persistAddress(null);
-  }, [persistAddress]);
+
+    // Clear the session cookie on the proxy
+    clearSession();
+  }, [persistAddress, clearSession]);
 
   useEffect(() => {
     void detectFreighter();
@@ -258,6 +366,11 @@ export const useSoroban = () => {
     validateNetwork().then(() => refreshBalance());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    checkSession();
+  }, [checkSession]);
 
   // ── Fixed sendXlm: uses stellar-sdk Server for cleaner interaction ──
   const sendXlm = useCallback(
@@ -346,106 +459,6 @@ export const useSoroban = () => {
     [address],
   );
 
-  // ── Challenge-response wallet ownership verification ──
-
-  const AUTH_API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081';
-
-  const [verifiedWallet, setVerifiedWallet] = useState(false);
-  const [verificationError, setVerificationError] = useState<string | null>(null);
-
-  /**
-   * Verify wallet ownership via challenge-response.
-   * After Freighter grants access, this proves the user holds the private key.
-   */
-  const verifyWalletOwnership = useCallback(async (walletAddress: string): Promise<boolean> => {
-    try {
-      setVerifiedWallet(false);
-      setVerificationError(null);
-
-      // 1. Request nonce from backend
-      const challengeRes = await fetch(`${AUTH_API_BASE}/api/auth/challenge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stellar_address: walletAddress }),
-      });
-
-      if (!challengeRes.ok) {
-        throw new Error(`Challenge request failed: ${challengeRes.statusText}`);
-      }
-
-      const { nonce, message } = await challengeRes.json();
-
-      // 2. Sign the nonce message with Freighter
-      // Create a minimal transaction that carries the nonce as its memo
-      // This is a standard Stellar approach — the nonce in the memo field
-      // proves the signer controls the account.
-      const { TransactionBuilder, Operation, Networks, BASE_FEE, Memo, Asset } =
-        await import('@stellar/stellar-sdk');
-
-      const server = new (await import('@stellar/stellar-sdk')).Horizon.Server(
-        process.env.NEXT_PUBLIC_HORIZON_URL || 'https://horizon-testnet.stellar.org'
-      );
-
-      const sourceAccount = await server.loadAccount(walletAddress);
-
-      const tx = new TransactionBuilder(sourceAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: Networks.TESTNET,
-      })
-        .addOperation(Operation.payment({
-          destination: walletAddress, // Pay ourselves (min XLM)
-          asset: Asset.native(),
-          amount: '0.0000001',
-        }))
-        .addMemo(Memo.text(message.slice(0, 28))) // Memo max 28 bytes
-        .setTimeout(30)
-        .build();
-
-      const txXDR = tx.toXDR();
-
-      const signed = await freighterSignTransaction(txXDR, {
-        networkPassphrase: Networks.TESTNET,
-        address: walletAddress,
-      });
-
-      if (signed.error) throw new Error(`Signing error: ${signed.error.message}`);
-      if (!signed.signedTxXdr) throw new Error('No signed XDR returned');
-
-      // 3. Send signed transaction XDR to backend for verification
-      const verifyRes = await fetch(`${AUTH_API_BASE}/api/auth/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stellar_address: walletAddress,
-          nonce: message,
-          signature: signed.signedTxXdr,
-        }),
-      });
-
-      if (!verifyRes.ok) {
-        const errBody = await verifyRes.text().catch(() => '');
-        throw new Error(`Verification failed: ${errBody}`);
-      }
-
-      const { verified, token } = await verifyRes.json();
-
-      if (!verified) {
-        throw new Error('Wallet ownership not verified');
-      }
-
-      // 4. Store session token
-      localStorage.setItem('maintchain:auth:token', token);
-      setVerifiedWallet(true);
-      return true;
-
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      setVerificationError(msg);
-      setVerifiedWallet(false);
-      return false;
-    }
-  }, [AUTH_API_BASE]);
-
   return {
     freighterInstalled,
     isConnected,
@@ -456,6 +469,11 @@ export const useSoroban = () => {
 
     networkOk,
     networkError,
+
+    // Auth session state
+    sessionVerified,
+    sessionVerifying,
+    sessionError,
 
     balanceLoading,
     balanceXlm,
@@ -468,9 +486,5 @@ export const useSoroban = () => {
     sendError,
 
     callContract,
-
-    verifiedWallet,
-    verificationError,
-    verifyWalletOwnership,
   };
 };

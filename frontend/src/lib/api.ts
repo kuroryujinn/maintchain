@@ -1,6 +1,9 @@
 // frontend/src/lib/api.ts
-// Typed fetch wrapper around the MaintChain Rust backend at localhost:8081
-// REST API design: plural resource names, proper HTTP methods, structured errors.
+// Typed fetch wrapper around the MaintChain Rust backend via the Next.js API proxy.
+// The browser talks to /api/* on the Next.js server, which forwards to the Rust backend
+// with the server-side API key. The browser never hits port 8081 directly.
+//
+// See: frontend/src/app/api/[...proxy]/route.ts
 
 import type {
   AuditResponse,
@@ -18,7 +21,8 @@ import type {
   ApiErrorResponse,
 } from './api-types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081';
+// The proxy lives at /api/* on the same origin — no NEXT_PUBLIC_* env var needed
+const BASE_URL = '/api';
 
 export class ApiError extends Error {
   public code: string;

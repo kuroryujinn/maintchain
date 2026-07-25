@@ -23,7 +23,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchCompliance = async () => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081'}/compliance/dashboard`);
+        const res = await fetch('/api/compliance/dashboard');
         if (res.ok) {
           const data = await res.json();
           setCompliance(data);

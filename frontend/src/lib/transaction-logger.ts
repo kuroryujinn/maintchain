@@ -42,9 +42,8 @@ export function addTxLogEvent(event: Omit<TxLogEvent, 'id' | 'timestamp'>) {
   });
   saveLog(log);
 
-  // Also post to backend if available
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081';
-  fetch(`${apiBase}/api/tx-log`, {
+  // Also post to backend via the Next.js API proxy (server-side)
+  fetch(`/api/tx-log`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(event),

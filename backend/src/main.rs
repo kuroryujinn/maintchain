@@ -1,6 +1,7 @@
 use axum::{
     extract::{Multipart, Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
+    middleware,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -14,20 +15,21 @@ use std::net::SocketAddr;
 use sqlx::migrate::Migrator;
 
 mod audit;
+mod auth;
 mod complaint;
 mod soroban_client;
 mod storage;
 #[allow(dead_code)]
 mod seed;
 use audit::{approve_by_auditor, get_audit_trail};
+use auth::{create_challenge, identity_middleware, resolve_user_stellar_address, verify_challenge};
 use complaint::check_eligibility;
 use soroban_client::{get_onchain_attestation, get_onchain_record};
-mod auth;
 mod tx_log;
 
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // ─── Sentry / Error Tracking ─────────────────────────────────────
 use sentry_tower::NewSentryLayer;
@@ -56,47 +58,83 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
     Some(guard)
 }
 
-// Simple API key auth (demo-grade). Production should use Stellar auth / signed requests.
-// Header: Authorization: Bearer <API_KEY>
-// NOTE: Not wired into the router yet.
+// ─── Authentication (two layers) ───────────────────────────
+// Layer 1: MAINTCHAIN_API_KEY (server-to-server, used by the proxy)
+//   The Next.js proxy injects this as a Bearer token on every forwarded
+//   request. The backend checks it on all non-/health, non-/auth routes.
+//
+// Layer 2: Wallet-signature session (per-user, used by the proxy)
+//   The proxy validates an HMAC-signed cookie on non-/auth routes and
+//   adds an X-User-Address header before forwarding. The backend enforces
+//   this header via identity_middleware (checks stellar_address field in
+//   JSON bodies) and inline handler checks (resolves UUID identity fields
+//   via DB lookup against the authenticated user).
+//
+// See also: frontend/src/app/api/[...proxy]/route.ts for the proxy-side
+//           session validation logic.
+//
+// The challenge/verify endpoints at /auth/challenge and /auth/verify
+// are PUBLIC (no MAINTCHAIN_API_KEY needed) so the proxy can call them
+// without circular dependency.
+
 const API_KEY_ENV: &str = "MAINTCHAIN_API_KEY";
 
-#[allow(dead_code)]
-fn api_key() -> Option<String> {
+/// Check if the API key is configured.
+fn is_api_key_configured() -> bool {
     std::env::var(API_KEY_ENV)
         .ok()
-        .filter(|s| !s.trim().is_empty())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
 }
 
-#[allow(dead_code)]
-fn is_authorized(authorization: Option<&str>) -> bool {
-    let Some(expected) = api_key() else {
+/// Validate a Bearer token against the configured API key.
+fn validate_token(token: &str) -> bool {
+    if !is_api_key_configured() {
+        // Dev mode — all tokens pass
         return true;
-    }; // if not set, allow in dev
-    match authorization {
-        Some(v) => v.trim() == format!("Bearer {}", expected),
-        None => false,
+    }
+    match std::env::var(API_KEY_ENV) {
+        Ok(expected) => token == expected.trim(),
+        Err(_) => true, // Dev mode fallback (unreachable if is_api_key_configured is correct)
     }
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-struct Authed;
-
-#[allow(dead_code)]
-async fn auth<B>(
-    req: axum::http::Request<B>,
-    _state: axum::extract::State<AppState>,
-) -> Result<axum::http::Request<B>, axum::http::StatusCode> {
+/// Axum middleware that enforces API-key auth on protected routes.
+///
+/// Checks `Authorization: Bearer <token>` against MAINTCHAIN_API_KEY.
+/// If MAINTCHAIN_API_KEY is not set, all requests pass (dev mode).
+async fn auth_middleware(
+    req: axum::http::Request<axum::body::Body>,
+    next: middleware::Next,
+) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
     let header = req
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok());
 
-    if is_authorized(header) {
-        Ok(req)
+    let authed = match header {
+        Some(value) if value.starts_with("Bearer ") => {
+            let token = &value[7..].trim();
+            validate_token(token)
+        }
+        _ => {
+            // No Authorization header = immediate reject (unless dev mode)
+            validate_token("")
+        }
+    };
+
+    if authed {
+        Ok(next.run(req).await)
     } else {
-        Err(axum::http::StatusCode::UNAUTHORIZED)
+        Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Missing or invalid API key. Set Authorization: Bearer <MAINTCHAIN_API_KEY>."
+                }
+            })),
+        ))
     }
 }
 
@@ -269,12 +307,18 @@ async fn list_maintenance(
 
 async fn register_equipment(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<RegisterEquipmentRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     info!(
         "register_equipment equipment_id={} owner_id={}",
         req.equipment_id, req.owner_id
     );
+
+    // Verify identity: owner_id UUID must resolve to the X-User-Address caller
+    if let Err(e) = verify_uuid_identity(&state.db, &headers, &req.owner_id, "owner_id").await {
+        return Err(e);
+    }
 
     let res = sqlx::query(
         r#"
@@ -308,6 +352,7 @@ async fn register_equipment(
 
 async fn create_maintenance_order(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<CreateMaintenanceOrderRequest>,
 ) -> Result<Json<MaintenanceResponse>, (StatusCode, String)> {
     let maintenance_id = Uuid::new_v4();
@@ -315,6 +360,11 @@ async fn create_maintenance_order(
         "create_maintenance_order maintenance_id={} equipment_id={} technician_id={}",
         maintenance_id, req.equipment_id, req.technician_id
     );
+
+    // Verify identity: technician_id UUID must resolve to the X-User-Address caller
+    if let Err(e) = verify_uuid_identity(&state.db, &headers, &req.technician_id, "technician_id").await {
+        return Err(e);
+    }
 
     // Initial status is OPEN with no evidence yet.
     // Evidence hash will be set when the technician submits evidence.
@@ -758,6 +808,69 @@ async fn compliance_dashboard(
     }))
 }
 
+// ─── Identity Enforcement Helpers ───────────────────────
+
+/// Verify that a UUID identity field resolves to the X-User-Address caller.
+///
+/// Reads the X-User-Address header from the proxied request, looks up the
+/// user by UUID in the database, and rejects with 403 if the resolved Stellar
+/// address doesn't match the header.
+///
+/// If X-User-Address is not set (dev mode or direct access), the check passes.
+async fn verify_uuid_identity(
+    db: &sqlx::PgPool,
+    headers: &HeaderMap,
+    user_id: &Uuid,
+    field_name: &str,
+) -> Result<(), (StatusCode, String)> {
+    let user_address = headers
+        .get("X-User-Address")
+        .and_then(|v| v.to_str().ok());
+
+    let Some(authenticated_user) = user_address else {
+        // No X-User-Address header — proxy didn't authenticate. Allow in dev.
+        return Ok(());
+    };
+
+    let resolved = resolve_user_stellar_address(db, user_id)
+        .await
+        .map_err(|e| {
+            error!("verify_uuid_identity: db lookup failed for {field_name}={user_id}: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Identity verification failed".to_string())
+        })?;
+
+    match resolved {
+        Some(stellar_addr) if stellar_addr == authenticated_user => {
+            // Identity matches
+            Ok(())
+        }
+        Some(stellar_addr) => {
+            error!(
+                "identity mismatch: {}={} resolves to '{}' but X-User-Address is '{}'",
+                field_name, user_id, stellar_addr, authenticated_user
+            );
+            Err((
+                StatusCode::FORBIDDEN,
+                format!(
+                    "Field '{}' value '{}' resolves to user '{}' which does not match the authenticated caller '{}'",
+                    field_name, user_id, stellar_addr, authenticated_user
+                ),
+            ))
+        }
+        None => {
+            // User UUID not found in database — reject
+            error!(
+                "identity verification: {}={} not found in users table",
+                field_name, user_id
+            );
+            Err((
+                StatusCode::FORBIDDEN,
+                format!("User '{}' not found for field '{}'", user_id, field_name),
+            ))
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -831,17 +944,28 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState { db };
 
-    // CORS — allow all origins for local development
+    // CORS — allow configured origin or localhost:3000 for development
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(AllowOrigin::predicate(|origin: &axum::http::HeaderValue, _parts: &axum::http::request::Parts| {
+            let allowed = std::env::var("CORS_ORIGIN")
+                .unwrap_or_else(|_| "http://localhost:3000".to_string());
+            // Compare the origin header value as bytes against the configured origin
+            origin.as_bytes() == allowed.as_bytes() || allowed == "*"
+        }))
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
+        .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE]);
 
-    let app = Router::new()
-        // Health
+    // ─── Build protected and public route trees ───
+    // Public routes (no MAINTCHAIN_API_KEY required):
+    let public_routes = Router::new()
         .route("/health", get(health))
         .route("/health/config", get(health_config))
+        // Auth routes — public so the proxy can call them without the API key
+        .route("/auth/challenge", post(create_challenge))
+        .route("/auth/verify", post(verify_challenge));
 
+    // Protected routes (auth required):
+    let protected_routes = Router::new()
         // Hash utility
         .route("/hash/evidence", post(compute_hash))
 
@@ -854,17 +978,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/maintenance/:id", get(get_maintenance))
         .route("/maintenance/:id/evidence", post(submit_evidence))
         .route("/maintenance/:id/evidence/upload", post(upload_evidence_file))
-        .route(
-            "/maintenance/:id/approvals/supervisor",
-            post(supervisor_approve),
-        )
-        .route(
-            "/maintenance/:id/approvals/supervisor/reject",
-            post(supervisor_reject),
-        )
-        .route("/maintenance/:id/audit", get(get_audit_trail))        .route("/maintenance/:id/approvals/auditor",
-            post(approve_by_auditor),
-        )
+        .route("/maintenance/:id/approvals/supervisor", post(supervisor_approve))
+        .route("/maintenance/:id/approvals/supervisor/reject", post(supervisor_reject))
+        .route("/maintenance/:id/audit", get(get_audit_trail))
+        .route("/maintenance/:id/approvals/auditor", post(approve_by_auditor))
         .route("/maintenance/pending", get(list_pending_approvals))
         .route("/compliance/dashboard", get(compliance_dashboard))
         .route("/compliance/eligible/:id", get(check_eligibility))
@@ -874,13 +991,22 @@ async fn main() -> anyhow::Result<()> {
         .route("/users/count", get(user_count))
         .route("/users/:stellar_address", get(get_user_by_stellar))
 
-        // Auth routes
-        .route("/api/auth/challenge", post(crate::auth::create_challenge))
-        .route("/api/auth/verify", post(crate::auth::verify_challenge))
-
         // Transaction log routes
-        .route("/api/tx-log", get(crate::tx_log::list_tx_log).post(crate::tx_log::post_tx_log))
+        // NOTE: path is /tx-log (not /api/tx-log) for consistency with proxy path stripping.
+        // The proxy forwards /api/tx-log → /tx-log.
+        .route("/tx-log", get(crate::tx_log::list_tx_log).post(crate::tx_log::post_tx_log))
 
+        // Layer 2: Identity enforcement middleware (checks X-User-Address against
+        // string identity fields in JSON bodies). Runs AFTER the API key check.
+        .layer(middleware::from_fn(identity_middleware))
+
+        // Layer 1: API-key auth middleware
+        .layer(middleware::from_fn(auth_middleware));
+
+    // Merge public and protected routes
+    let app = Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         // Sentry middleware — captures performance data and errors for all requests
         .layer(NewSentryLayer::new_from_top())
         .layer(cors)
@@ -889,6 +1015,14 @@ async fn main() -> anyhow::Result<()> {
     let port = std::env::var("PORT").unwrap_or_else(|_| "8081".to_string());
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()
         .expect("Invalid PORT value; must be a valid port number");
+
+    // Warn if MAINTCHAIN_API_KEY is not set
+    if !is_api_key_configured() {
+        warn!(
+            "MAINTCHAIN_API_KEY is not set — all protected endpoints will accept requests without authentication. \
+             Set this env var in production to enable API-key auth."
+        );
+    }
 
     info!("backend listening on http://{addr}");
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;

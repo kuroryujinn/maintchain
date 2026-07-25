@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { Lock, ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react';
 
 import { useSoroban } from '@/hooks/useSoroban';
 
@@ -19,6 +20,9 @@ export default function WalletConnectPanel({ compact = false, className = '' }: 
     freighterInstalled,
     isConnected,
     networkError,
+    sessionVerified,
+    sessionVerifying,
+    sessionError,
   } = useSoroban();
 
   const truncatedAddress = useMemo(() => {
@@ -31,6 +35,40 @@ export default function WalletConnectPanel({ compact = false, className = '' }: 
       <div className={`flex items-center gap-3 ${className}`.trim()}>
         {isConnected ? (
           <>
+            {/* Session verification indicator */}
+            <div className="hidden sm:flex items-center">
+              {sessionVerified ? (
+                <span
+                  className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400"
+                  title="Session verified — your wallet signature has been validated"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  <span>Verified</span>
+                </span>
+              ) : sessionVerifying ? (
+                <span
+                  className="flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-400"
+                  aria-label="Verifying wallet session"
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Verifying...</span>
+                </span>
+              ) : sessionError ? (
+                <span
+                  className="flex items-center gap-1.5 rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-400"
+                  title={sessionError}
+                >
+                  <ShieldAlert className="h-3.5 w-3.5" />
+                  <span>Auth failed</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 rounded-full bg-slate-500/10 px-2.5 py-1 text-xs font-medium text-slate-400">
+                  <Lock className="h-3.5 w-3.5" />
+                  <span>No session</span>
+                </span>
+              )}
+            </div>
+
             <div className="hidden sm:flex flex-col items-end text-right">
               <span className="text-xs uppercase tracking-[0.24em] text-slate-400">Freighter</span>
               <span className="font-mono text-sm text-white/90">{truncatedAddress}</span>
