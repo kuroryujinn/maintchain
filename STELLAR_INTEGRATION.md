@@ -399,7 +399,7 @@ Browser                          Proxy                         Backend
   │                                │                              │
   │── Freighter signMessage() ────►                                │
   │   SEP-53:                                                     │
-  │   1. payload = "Stellar Signed    \n" + message               │
+  │   1. payload = "Stellar Signed Message:\n" + message          │
   │   2. hash = SHA256(payload)                                   │
   │   3. signature = Ed25519_sign(hash)                            │
   │◄── { signedMessage } ─────────                                │
