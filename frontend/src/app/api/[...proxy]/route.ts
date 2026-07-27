@@ -224,17 +224,27 @@ function buildResponseHeaders(response: Response): Headers {
  * success response and attaches the session cookie.
  */
 async function handleAuthVerify(request: NextRequest): Promise<NextResponse> {
+  const proto = request.headers.get('x-forwarded-proto') || 'http';
+  console.log(`[proxy] /auth/verify called, protocol=${proto}, method=${request.method}`);
+
   try {
     const targetUrl = buildTargetUrl(request);
     const proxyHeaders = buildProxyHeaders(request);
 
+    // Check if body is available
+    const hasBody = !!request.body;
+    console.log(`[proxy] forwarding to ${targetUrl}, hasBody=${hasBody}`);
+
     const body = request.body ? await request.arrayBuffer() : undefined;
+    console.log(`[proxy] body bytes: ${body ? body.byteLength : 0}`);
 
     const response = await fetch(targetUrl, {
       method: request.method,
       headers: proxyHeaders,
       body: body ?? null,
     });
+
+    console.log(`[proxy] backend responded: ${response.status} ${response.statusText}`);
 
     const responseBody = await response.arrayBuffer();
     const responseHeaders = buildResponseHeaders(response);
@@ -248,10 +258,9 @@ async function handleAuthVerify(request: NextRequest): Promise<NextResponse> {
         const text = Buffer.from(responseBody).toString('utf-8');
         const json = JSON.parse(text);
         stellarAddress = json.stellar_address ?? null;
-      } catch {
-        // If we can't parse the body, still let the response through
-        // but log a warning.
-        console.warn('[proxy] /auth/verify: could not parse backend response body');
+        console.log(`[proxy] parsed stellar_address: ${stellarAddress}`);
+      } catch (e) {
+        console.warn('[proxy] /auth/verify: could not parse backend response body:', e);
       }
 
       if (stellarAddress) {
@@ -260,16 +269,27 @@ async function handleAuthVerify(request: NextRequest): Promise<NextResponse> {
           Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
         );
 
+        // Only set Secure flag in production (Vercel always uses HTTPS).
+        // Local dev (HTTP) won't store a Secure cookie -> silent session failure.
+        const isSecure = process.env.NODE_ENV === 'production';
+        const secureFlag = isSecure ? 'Secure; ' : '';
+
+        console.log(`[proxy] setting cookie for ${stellarAddress}, NODE_ENV=${process.env.NODE_ENV}, secureFlag="${secureFlag}"`);
+
         responseHeaders.set(
           'Set-Cookie',
           `${SESSION_COOKIE_NAME}=${cookieValue}; ` +
-            `HttpOnly; Secure; SameSite=Lax; Path=/api; ` +
+            `HttpOnly; ${secureFlag}SameSite=Lax; Path=/api; ` +
             `Max-Age=${SESSION_MAX_AGE_SECONDS}; ` +
             `Expires=${expiresDate.toUTCString()}`,
         );
-
-        console.log(`[proxy] session created for ${stellarAddress}`);
+      } else {
+        console.warn('[proxy] stellarAddress was null, NOT setting session cookie');
       }
+    } else {
+      console.warn(`[proxy] backend returned non-OK: ${response.status}`);
+      const text = Buffer.from(responseBody).toString('utf-8');
+      console.warn(`[proxy] backend error body: ${text.slice(0, 500)}`);
     }
 
     return new NextResponse(responseBody, {
@@ -278,6 +298,7 @@ async function handleAuthVerify(request: NextRequest): Promise<NextResponse> {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error(`[proxy] /auth/verify CRITICAL ERROR: ${message}`, err);
     return NextResponse.json(
       {
         error: {

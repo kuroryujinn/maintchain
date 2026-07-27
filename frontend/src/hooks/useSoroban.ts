@@ -217,23 +217,30 @@ export const useSoroban = () => {
   // ── Auth: verify wallet ownership via challenge-response ──
 
   const verifyWallet = useCallback(async (walletAddress: string): Promise<boolean> => {
+    console.log('[auth] verifyWallet start for', walletAddress);
     setSessionVerifying(true);
     setSessionError(null);
 
     try {
       // 1. Request challenge from backend
+      console.log('[auth] STEP 1: requesting challenge...');
       const challengeRes = await fetch('/api/auth/challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stellar_address: walletAddress }),
       });
 
+      console.log('[auth] STEP 1 response:', challengeRes.status, challengeRes.statusText);
+
       if (!challengeRes.ok) {
         const errBody = await challengeRes.json().catch(() => ({}));
+        console.warn('[auth] challenge failed:', errBody);
         throw new Error(errBody?.error?.message || 'Challenge request failed');
       }
 
-      const { message } = await challengeRes.json();
+      const challengeData = await challengeRes.json();
+      const { message } = challengeData;
+      console.log('[auth] STEP 2: challenge received, message length:', message?.length);
 
       // 2. Sign the challenge message with Freighter's signMessage.
       //    This returns a raw Ed25519 signature over the message bytes,
@@ -242,38 +249,56 @@ export const useSoroban = () => {
       //     which is NOT a raw signature and cannot be verified by the
       //     backend's verify_challenge handler.)
       // freighter-sign-message@v6 accepts a plain string, not an object
+      console.log('[auth] STEP 3: requesting Freighter signMessage...');
       const signed = await freighterSignMessage(message);
 
-      const sigResult = signed as unknown as { signedMessage?: string; error?: { message: string } };
-      if (sigResult.error) {
-        throw new Error(`Signing error: ${sigResult.error.message}`);
+      console.log('[auth] STEP 3 Freighter response type:', typeof signed, 'keys:', Object.keys(signed as object));
+
+      // Freighter v6 returns { signedMessage: string } on success or { error: string } on failure
+      // (error is a plain string, not { message: string })
+      const signedResponse = signed as Record<string, unknown>;
+      if (signedResponse.error) {
+        const errorMsg = typeof signedResponse.error === 'string'
+          ? signedResponse.error
+          : (signedResponse.error as any)?.message || 'unknown error';
+        console.warn('[auth] Freighter sign error:', errorMsg);
+        throw new Error(`Signing error: ${errorMsg}`);
       }
-      if (!sigResult.signedMessage) {
+      const signedMessage = signedResponse.signedMessage;
+      if (typeof signedMessage !== 'string' || signedMessage.length === 0) {
+        console.warn('[auth] no signedMessage in Freighter response, keys:', Object.keys(signed as object));
         throw new Error('No signed message returned from Freighter');
       }
+      console.log('[auth] signature length:', signedMessage.length);
 
       // 3. Send the raw Ed25519 signature to the proxy (which forwards
       //    to backend for verification). The proxy will create a session
       //    cookie on success.
+      console.log('[auth] STEP 4: submitting verify request...');
       const verifyRes = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           stellar_address: walletAddress,
           nonce: message,
-          signature: signed.signedMessage,
+          signature: signedMessage,
         }),
       });
 
+      console.log('[auth] STEP 4 verify response:', verifyRes.status, verifyRes.statusText);
+
       if (!verifyRes.ok) {
         const errBody = await verifyRes.json().catch(() => ({}));
+        console.warn('[auth] verify failed:', errBody);
         throw new Error(errBody?.error?.message || 'Signature verification failed');
       }
 
+      console.log('[auth] SUCCESS — session verified');
       setSessionVerified(true);
       return true;
     } catch (e: any) {
       const msg = e?.message || String(e);
+      console.warn('[auth] FAILED:', msg);
       setSessionError(msg);
       setSessionVerified(false);
       return false;
