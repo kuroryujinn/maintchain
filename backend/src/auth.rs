@@ -215,8 +215,11 @@ pub async fn verify_challenge(
         (StatusCode::BAD_REQUEST, "Invalid signature".to_string())
     })?;
 
-    // SHA-256 hash the message first (matches Freighter's signMessage per SEP-30)
+    // SHA-256 hash the message with SEP-53 prefix (matches Freighter's signMessage spec).
+    // Freighter prepends "Stellar Signed Message:\n" to the message before SHA-256 hashing
+    // and Ed25519 signing. The backend must do the same for verification.
     let mut hasher = Sha256::new();
+    hasher.update(b"Stellar Signed Message:\n");
     hasher.update(stored_nonce.as_bytes());
     let message_hash = hasher.finalize();
 
