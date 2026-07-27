@@ -217,64 +217,43 @@ export const useSoroban = () => {
   // ── Auth: verify wallet ownership via challenge-response ──
 
   const verifyWallet = useCallback(async (walletAddress: string): Promise<boolean> => {
-    console.log('[auth] verifyWallet start for', walletAddress);
     setSessionVerifying(true);
     setSessionError(null);
 
     try {
       // 1. Request challenge from backend
-      console.log('[auth] STEP 1: requesting challenge...');
       const challengeRes = await fetch('/api/auth/challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stellar_address: walletAddress }),
       });
 
-      console.log('[auth] STEP 1 response:', challengeRes.status, challengeRes.statusText);
-
       if (!challengeRes.ok) {
         const errBody = await challengeRes.json().catch(() => ({}));
-        console.warn('[auth] challenge failed:', errBody);
         throw new Error(errBody?.error?.message || 'Challenge request failed');
       }
 
-      const challengeData = await challengeRes.json();
-      const { message } = challengeData;
-      console.log('[auth] STEP 2: challenge received, message length:', message?.length);
+      const { message } = await challengeRes.json();
 
       // 2. Sign the challenge message with Freighter's signMessage.
-      //    This returns a raw Ed25519 signature over the message bytes,
-      //    which the backend can verify directly using ed25519-dalek.
-      //    (Using signTransaction would send a Stellar transaction XDR,
-      //     which is NOT a raw signature and cannot be verified by the
-      //     backend's verify_challenge handler.)
-      // freighter-sign-message@v6 accepts a plain string, not an object
-      console.log('[auth] STEP 3: requesting Freighter signMessage...');
       const signed = await freighterSignMessage(message);
 
-      console.log('[auth] STEP 3 Freighter response type:', typeof signed, 'keys:', Object.keys(signed as object));
-
       // Freighter v6 returns { signedMessage: string } on success or { error: string } on failure
-      // (error is a plain string, not { message: string })
       const signedResponse = signed as Record<string, unknown>;
       if (signedResponse.error) {
         const errorMsg = typeof signedResponse.error === 'string'
           ? signedResponse.error
           : (signedResponse.error as any)?.message || 'unknown error';
-        console.warn('[auth] Freighter sign error:', errorMsg);
         throw new Error(`Signing error: ${errorMsg}`);
       }
       const signedMessage = signedResponse.signedMessage;
       if (typeof signedMessage !== 'string' || signedMessage.length === 0) {
-        console.warn('[auth] no signedMessage in Freighter response, keys:', Object.keys(signed as object));
         throw new Error('No signed message returned from Freighter');
       }
-      console.log('[auth] signature length:', signedMessage.length);
 
       // 3. Send the raw Ed25519 signature to the proxy (which forwards
       //    to backend for verification). The proxy will create a session
       //    cookie on success.
-      console.log('[auth] STEP 4: submitting verify request...');
       const verifyRes = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -285,30 +264,24 @@ export const useSoroban = () => {
         }),
       });
 
-      console.log('[auth] STEP 4 verify response:', verifyRes.status, verifyRes.statusText);
-
       if (!verifyRes.ok) {
-        // Try JSON first, then fall back to plain text
+        // Try JSON first, then fall back to plain text (backend returns text errors)
         const contentType = verifyRes.headers.get('content-type') || '';
         let errorMessage = 'Signature verification failed';
         if (contentType.includes('json')) {
           const errBody = await verifyRes.json().catch(() => ({}));
-          console.warn('[auth] verify failed (JSON):', errBody);
           errorMessage = errBody?.error?.message || errBody?.message || errorMessage;
         } else {
           const text = await verifyRes.text().catch(() => '');
-          console.warn('[auth] verify failed (text):', text);
           errorMessage = text || errorMessage;
         }
         throw new Error(errorMessage);
       }
 
-      console.log('[auth] SUCCESS — session verified');
       setSessionVerified(true);
       return true;
     } catch (e: any) {
       const msg = e?.message || String(e);
-      console.warn('[auth] FAILED:', msg);
       setSessionError(msg);
       setSessionVerified(false);
       return false;
@@ -356,7 +329,13 @@ export const useSoroban = () => {
 
       // After wallet connects, verify ownership via challenge-response
       // The proxy sets an httpOnly session cookie on success
-      await verifyWallet(authAddress);
+      const verified = await verifyWallet(authAddress);
+      if (!verified) {
+        // If verification failed, propagate the session error to walletError
+        // so the UI can display it prominently instead of just the badge tooltip
+        const errMsg = sessionError || 'Wallet verification failed';
+        throw new Error(errMsg);
+      }
     } catch (e: any) {
       setWalletError({
         message: e?.message ? String(e.message) : 'Freighter connection failed.',
