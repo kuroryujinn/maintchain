@@ -288,9 +288,19 @@ export const useSoroban = () => {
       console.log('[auth] STEP 4 verify response:', verifyRes.status, verifyRes.statusText);
 
       if (!verifyRes.ok) {
-        const errBody = await verifyRes.json().catch(() => ({}));
-        console.warn('[auth] verify failed:', errBody);
-        throw new Error(errBody?.error?.message || 'Signature verification failed');
+        // Try JSON first, then fall back to plain text
+        const contentType = verifyRes.headers.get('content-type') || '';
+        let errorMessage = 'Signature verification failed';
+        if (contentType.includes('json')) {
+          const errBody = await verifyRes.json().catch(() => ({}));
+          console.warn('[auth] verify failed (JSON):', errBody);
+          errorMessage = errBody?.error?.message || errBody?.message || errorMessage;
+        } else {
+          const text = await verifyRes.text().catch(() => '');
+          console.warn('[auth] verify failed (text):', text);
+          errorMessage = text || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       console.log('[auth] SUCCESS — session verified');
