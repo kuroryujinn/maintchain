@@ -94,14 +94,14 @@ function StepIndicator({ current, step, label }: { current: Step; step: Step; la
   // Determine if this step is in the past (completed)
   const order: Step[] = [
     'idle', 'connecting_wallet', 'wallet_connected', 'checking_readiness',
-    'readiness_failed', 'checking_user', 'user_form', 'registering_user',
+    'checking_user', 'user_form', 'registering_user',
     'review_verification', 'computing_hashes', 'signing_transaction',
     'submitting_transaction', 'confirming_transaction', 'transaction_failed',
     'syncing_backend', 'success', 'error',
   ];
   const currentIdx = order.indexOf(current);
   const stepIdx = order.indexOf(step);
-  const isPast = stepIdx >= 0 && currentIdx >= 0 && stepIdx < currentIdx && current !== 'error' && current !== 'readiness_failed' && current !== 'transaction_failed';
+  const isPast = stepIdx >= 0 && currentIdx >= 0 && stepIdx < currentIdx && current !== 'error' && current !== 'transaction_failed';
 
   return (
     <div className={`flex items-center gap-2 ${isPast ? 'text-emerald-600' : isActive ? 'text-blue-600' : 'text-slate-300'}`}>

@@ -241,12 +241,14 @@ export const useSoroban = () => {
       //    (Using signTransaction would send a Stellar transaction XDR,
       //     which is NOT a raw signature and cannot be verified by the
       //     backend's verify_challenge handler.)
-      const signed = await freighterSignMessage({ message });
+      // freighter-sign-message@v6 accepts a plain string, not an object
+      const signed = await freighterSignMessage(message);
 
-      if (signed.error) {
-        throw new Error(`Signing error: ${signed.error.message}`);
+      const sigResult = signed as unknown as { signedMessage?: string; error?: { message: string } };
+      if (sigResult.error) {
+        throw new Error(`Signing error: ${sigResult.error.message}`);
       }
-      if (!signed.signedMessage) {
+      if (!sigResult.signedMessage) {
         throw new Error('No signed message returned from Freighter');
       }
 
