@@ -195,6 +195,7 @@ export const useSoroban = () => {
   }, [address, horizon]);
 
   // ── Auth: check existing session ──────────────────────────
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   const checkSession = useCallback(async () => {
     try {
@@ -211,6 +212,8 @@ export const useSoroban = () => {
     } catch {
       setSessionVerified(false);
       return null;
+    } finally {
+      setSessionChecked(true);
     }
   }, []);
 
@@ -306,7 +309,7 @@ export const useSoroban = () => {
     setSessionError(null);
   }, []);
 
-  const connectWallet = useCallback(async () => {
+  const connectWallet = useCallback(async (): Promise<boolean> => {
     setWalletError(null);
     setNetworkError(null);
     setNetworkOk(true);
@@ -314,7 +317,7 @@ export const useSoroban = () => {
     const installed = await detectFreighter();
     if (!installed) {
       setWalletError({ message: 'Please install Freighter wallet.' });
-      return;
+      return false;
     }
 
     try {
@@ -332,9 +335,10 @@ export const useSoroban = () => {
       await refreshBalance(authAddress);
 
       // After wallet connects, verify ownership via challenge-response.
-      // verifyWallet now throws on failure (with the error message), so
-      // the outer catch block will set walletError and disconnect cleanly.
+      // verifyWallet now throws on failure, so the outer catch will
+      // disconnect and return false.
       await verifyWallet(authAddress);
+      return true;
     } catch (e: any) {
       setWalletError({
         message: e?.message ? String(e.message) : 'Freighter connection failed.',
@@ -342,6 +346,7 @@ export const useSoroban = () => {
       setIsConnected(false);
       setAddress(null);
       persistAddress(null);
+      return false;
     }
   }, [detectFreighter, persistAddress, refreshBalance, validateNetwork, verifyWallet]);
 
@@ -379,16 +384,20 @@ export const useSoroban = () => {
     };
   }, [readPersistedAddress]);
 
-  useEffect(() => {
-    if (!address) return;
-    validateNetwork().then(() => refreshBalance());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address]);
-
   // Check for existing session on mount
   useEffect(() => {
     checkSession();
   }, [checkSession]);
+
+  // Run network validation + balance refresh once session is checked AND address is set.
+  // Replaces the old [address]-only effect to prevent a race where checkSession
+  // hasn't completed yet but address is restored from localStorage.
+  useEffect(() => {
+    if (!sessionChecked) return;
+    if (!address) return;
+    validateNetwork().then(() => refreshBalance());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionChecked, address]);
 
   // ── Fixed sendXlm: uses stellar-sdk Server for cleaner interaction ──
   const sendXlm = useCallback(
@@ -492,6 +501,7 @@ export const useSoroban = () => {
     sessionVerified,
     sessionVerifying,
     sessionError,
+    sessionChecked,
 
     balanceLoading,
     balanceXlm,

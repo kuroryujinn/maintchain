@@ -153,13 +153,23 @@ export default function GetVerifiedPage() {
     setStep('connecting_wallet');
 
     try {
-      // Connect wallet (handles Freighter detection internally)
-      if (!soroban.isConnected) {
-        await soroban.connectWallet();
+      // Connect wallet (handles Freighter detection internally).
+      // connectWallet now returns true/false so the caller can check the
+      // result immediately instead of reading stale state from the closure.
+      let walletOk = false;
+
+      if (soroban.isConnected) {
+        // Wallet was previously connected (from localStorage restore).
+        // If session is already verified (cookie exists), skip re-verify.
+        // Otherwise, re-verify wallet ownership via connectWallet.
+        walletOk = soroban.sessionVerified || await soroban.connectWallet();
+      } else {
+        // Wallet not connected at all — connect and verify.
+        walletOk = await soroban.connectWallet();
       }
 
-      if (!soroban.isConnected || !soroban.address) {
-        setError('Wallet Required', 'Please connect your Freighter wallet to continue.');
+      if (!walletOk || !soroban.address) {
+        setError('Session Required', 'Wallet signature verification failed. Please reconnect your wallet and approve the signature prompt.');
         return;
       }
 
@@ -168,12 +178,6 @@ export default function GetVerifiedPage() {
       // Verify network
       if (!soroban.networkOk) {
         setError('Wrong Network', 'Please switch your Freighter wallet to Stellar Testnet.');
-        return;
-      }
-
-      // Verify session auth (challenge-response must have completed)
-      if (!soroban.sessionVerified) {
-        setError('Session Required', 'Wallet signature verification failed. Please reconnect your wallet and approve the signature prompt.');
         return;
       }
 
@@ -356,11 +360,14 @@ export default function GetVerifiedPage() {
   }, [soroban, isContractConfigured, existingUser, name, role, organization, setError]);
 
   // ─── Auto-connect on mount ───
+  // Wait for sessionChecked (set after checkSession completes) to avoid the
+  // race where readPersistedAddress restores the wallet from localStorage
+  // before checkSession finishes, causing stale reads of sessionVerified.
   useEffect(() => {
-    if (soroban.isConnected && soroban.address && step === 'idle') {
+    if (soroban.isConnected && soroban.address && soroban.sessionChecked && step === 'idle') {
       handleConnectAndCheck();
     }
-  }, [soroban.isConnected, soroban.address, step, handleConnectAndCheck]);
+  }, [soroban.isConnected, soroban.address, soroban.sessionChecked, step, handleConnectAndCheck]);
 
   // ─── Render ───
   return (
