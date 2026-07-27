@@ -50,7 +50,7 @@ export default function FinalCTA() {
 
         <div className="flex flex-wrap gap-3 lg:justify-end">
           <Link
-            href="/dashboard"
+            href="/get-verified"
             className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-slate-900 shadow-lg transition-all duration-200 hover:bg-slate-50 hover:shadow-xl hover:-translate-y-0.5"
           >
             Become Verified <ArrowRight className="h-4 w-4" />

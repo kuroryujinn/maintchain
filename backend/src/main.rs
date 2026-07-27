@@ -655,6 +655,42 @@ async fn upload_evidence_file(
     })))
 }
 
+// ─── Verification Types ────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct VerificationReadinessResponse {
+    database_ready: bool,
+    identity_registry_configured: bool,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct VerificationResponse {
+    id: Uuid,
+    user_id: Uuid,
+    stellar_address: String,
+    role: String,
+    organization: Option<String>,
+    profile_hash: String,
+    organization_hash: String,
+    verification_tx_hash: String,
+    verification_contract_id: String,
+    verified_at: DateTime<Utc>,
+    network: String,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateVerificationRequest {
+    stellar_address: String,
+    role: String,
+    organization: Option<String>,
+    profile_hash: String,
+    organization_hash: String,
+    verification_tx_hash: String,
+    verified_at: DateTime<Utc>,
+    network: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct RegisterUserRequest {
     stellar_address: String,
@@ -745,6 +781,165 @@ async fn user_count(
         .fetch_one(&state.db).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(UserCountResponse { total_users: count.0 }))
+}
+
+// ─── Verification Handlers ─────────────────────────────
+
+/// GET /verification/readiness
+///
+/// Checks database connectivity for the user_verifications table and
+/// whether IDENTITY_REGISTRY_CONTRACT_ID is configured.
+/// Returns 503 if either check fails.
+async fn verification_readiness(
+    State(state): State<AppState>,
+) -> Result<Json<VerificationReadinessResponse>, (StatusCode, String)> {
+    // Verify the user_verifications table is reachable
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM user_verifications")
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            error!("verification_readiness: table check failed: {e}");
+            (StatusCode::SERVICE_UNAVAILABLE, "Database not ready".to_string())
+        })?;
+
+    let configured = std::env::var("IDENTITY_REGISTRY_CONTRACT_ID")
+        .ok()
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+
+    Ok(Json(VerificationReadinessResponse {
+        database_ready: true,
+        identity_registry_configured: configured,
+    }))
+}
+
+/// GET /verification/:stellar_address
+///
+/// Returns the most recent verification record for a Stellar address.
+/// Returns 404 if no record exists.
+async fn get_verification_by_stellar(
+    State(state): State<AppState>,
+    Path(stellar_address): Path<String>,
+) -> Result<Json<VerificationResponse>, (StatusCode, String)> {
+    let row = sqlx::query_as::<_, VerificationResponse>(
+        r#"
+        SELECT id, user_id, stellar_address, role, organization,
+               profile_hash, organization_hash, verification_tx_hash,
+               verification_contract_id, verified_at, network, created_at
+        FROM user_verifications
+        WHERE stellar_address = $1
+        ORDER BY verified_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&stellar_address)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        error!("get_verification_by_stellar failed: {e}");
+        (StatusCode::NOT_FOUND, "verification not found".to_string())
+    })?;
+
+    Ok(Json(row))
+}
+
+/// POST /verification
+///
+/// Persists a successful on-chain verification result into Postgres.
+/// The stellar_address in the body must match the authenticated user's
+/// X-User-Address header (enforced by identity_middleware).
+async fn create_verification(
+    State(state): State<AppState>,
+    Json(req): Json<CreateVerificationRequest>,
+) -> Result<(StatusCode, Json<VerificationResponse>), (StatusCode, String)> {
+    // Resolve user_id from stellar_address
+    let user_row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE stellar_address = $1",
+    )
+    .bind(&req.stellar_address)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        error!("create_verification: user lookup failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
+    })?;
+
+    let user_id = match user_row {
+        Some((uid,)) => uid,
+        None => {
+            return Err((StatusCode::BAD_REQUEST, "User not found for stellar_address".to_string()));
+        }
+    };
+
+    let contract_id = std::env::var("IDENTITY_REGISTRY_CONTRACT_ID")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| {
+            warn!("IDENTITY_REGISTRY_CONTRACT_ID is not set — using 'unknown'");
+            "unknown".to_string()
+        });
+
+    let id = Uuid::new_v4();
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_verifications
+            (id, user_id, stellar_address, role, organization,
+             profile_hash, organization_hash, verification_tx_hash,
+             verification_contract_id, verified_at, network)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (user_id, verification_contract_id, network)
+        DO UPDATE SET
+            role = EXCLUDED.role,
+            organization = EXCLUDED.organization,
+            profile_hash = EXCLUDED.profile_hash,
+            organization_hash = EXCLUDED.organization_hash,
+            verification_tx_hash = EXCLUDED.verification_tx_hash,
+            verified_at = EXCLUDED.verified_at,
+            updated_at = now()
+        "#,
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(&req.stellar_address)
+    .bind(&req.role)
+    .bind(&req.organization)
+    .bind(&req.profile_hash)
+    .bind(&req.organization_hash)
+    .bind(&req.verification_tx_hash)
+    .bind(&contract_id)
+    .bind(req.verified_at)
+    .bind(&req.network)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        error!("create_verification insert failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
+    })?;
+
+    let row = sqlx::query_as::<_, VerificationResponse>(
+        r#"
+        SELECT id, user_id, stellar_address, role, organization,
+               profile_hash, organization_hash, verification_tx_hash,
+               verification_contract_id, verified_at, network, created_at
+        FROM user_verifications
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        error!("create_verification fetch failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
+    })?;
+
+    info!(
+        "verification created: stellar={} tx_hash={}",
+        req.stellar_address, req.verification_tx_hash
+    );
+
+    Ok((StatusCode::CREATED, Json(row)))
 }
 
 async fn list_pending_approvals(
@@ -991,6 +1186,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/users/count", get(user_count))
         .route("/users/:stellar_address", get(get_user_by_stellar))
 
+        // Verification routes
+        .route("/verification/readiness", get(verification_readiness))
+        .route("/verification/:stellar_address", get(get_verification_by_stellar))
+        .route("/verification", post(create_verification))
+
         // Transaction log routes
         // NOTE: path is /tx-log (not /api/tx-log) for consistency with proxy path stripping.
         // The proxy forwards /api/tx-log → /tx-log.
@@ -1021,6 +1221,19 @@ async fn main() -> anyhow::Result<()> {
         warn!(
             "MAINTCHAIN_API_KEY is not set — all protected endpoints will accept requests without authentication. \
              Set this env var in production to enable API-key auth."
+        );
+    }
+
+    // Warn if IDENTITY_REGISTRY_CONTRACT_ID is not set
+    let identity_registry_configured = std::env::var("IDENTITY_REGISTRY_CONTRACT_ID")
+        .ok()
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    if !identity_registry_configured {
+        warn!(
+            "IDENTITY_REGISTRY_CONTRACT_ID is not set — /verification/readiness will report \
+             identity_registry_configured: false. Set this env var in production to enable \
+             the Get Verified flow."
         );
     }
 

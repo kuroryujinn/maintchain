@@ -107,3 +107,36 @@ export interface RegisterUserRequest {
 export interface UserCountResponse {
   total_users: number;
 }
+
+// ─── Verification ─────────────────────────────────────────────
+
+export interface VerificationReadinessResponse {
+  database_ready: boolean;
+  identity_registry_configured: boolean;
+}
+
+export interface VerificationResponse {
+  id: string;
+  user_id: string;
+  stellar_address: string;
+  role: string;
+  organization: string | null;
+  profile_hash: string;
+  organization_hash: string;
+  verification_tx_hash: string;
+  verification_contract_id: string;
+  verified_at: string;
+  network: string;
+  created_at: string;
+}
+
+export interface CreateVerificationRequest {
+  stellar_address: string;
+  role: string;
+  organization?: string;
+  profile_hash: string;
+  organization_hash: string;
+  verification_tx_hash: string;
+  verified_at: string;
+  network: string;
+}

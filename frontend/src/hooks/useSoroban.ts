@@ -24,6 +24,9 @@ import { invokeContract, simulateContract, toScVal, bytes32ScVal } from '@/lib/s
 const FREIGHTER_LOCAL_KEY = 'maintchain:freighter:address';
 const WALLET_CHANGED_EVENT = 'maintchain:soroban-wallet-changed';
 
+export const IDENTITY_REGISTRY_ID =
+  process.env.NEXT_PUBLIC_IDENTITY_REGISTRY_ID || '';
+
 type WalletError = { message: string } | null;
 
 const HORIZON_TESTNET_URL = 'https://horizon-testnet.stellar.org';

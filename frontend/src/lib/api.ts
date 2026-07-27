@@ -8,6 +8,7 @@
 import type {
   AuditResponse,
   CreateMaintenanceOrderRequest,
+  CreateVerificationRequest,
   EquipmentResponse,
   HashRequest,
   HashResponse,
@@ -18,6 +19,8 @@ import type {
   RegisterUserRequest,
   UserResponse,
   UserCountResponse,
+  VerificationReadinessResponse,
+  VerificationResponse,
   ApiErrorResponse,
 } from './api-types';
 
@@ -148,4 +151,17 @@ export const api = {
 
   userCount: () =>
     request<UserCountResponse>('/users/count'),
+
+  // ─── Verification ─────────────────────────────────
+  verificationReadiness: () =>
+    request<VerificationReadinessResponse>('/verification/readiness'),
+
+  getVerificationByStellar: (stellarAddress: string) =>
+    request<VerificationResponse>(`/verification/${encodeURIComponent(stellarAddress)}`),
+
+  createVerification: (data: CreateVerificationRequest) =>
+    request<VerificationResponse>('/verification', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };

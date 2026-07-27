@@ -1,20 +1,23 @@
 // scripts/deploy-contracts.mjs
-// Deploys Soroban smart contracts to Stellar Testnet.
-// Prerequisites: WASM files built from contracts/*/
+// Deploys Soroban smart contracts to Stellar Testnet using the Stellar CLI.
+// Prerequisites:
+//   - WASM files built: cd contracts && cargo build --target wasm32v1-none --release
+//   - Stellar CLI installed: https://github.com/stellar/stellar-cli
+//   - DEPLOYER_SECRET_KEY env var set
 // Run: node scripts/deploy-contracts.mjs
-//
-// Requires: DEPLOYER_SECRET_KEY env var set to a funded Testnet account secret key.
-// Optional: SOROBAN_RPC_URL env var (defaults to https://soroban-testnet.stellar.org)
 
-import { Keypair } from '@stellar/stellar-sdk';
-import { readFileSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { spawnSync } from 'child_process';
+import { existsSync } from 'fs';
+import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
+import { Keypair } from '@stellar/stellar-sdk';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const RPC_URL = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
+const NETWORK_PASSPHRASE = process.env.SOROBAN_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
 const DEPLOYER_SECRET = process.env.DEPLOYER_SECRET_KEY;
+const STELLAR_BINARY = process.env.STELLAR_CLI_PATH || 'stellar';
 
 if (!DEPLOYER_SECRET) {
   console.error('ERROR: DEPLOYER_SECRET_KEY environment variable is required.');
@@ -25,72 +28,105 @@ if (!DEPLOYER_SECRET) {
 const CONTRACTS = [
   {
     name: 'EquipmentRegistry',
-    wasmPath: resolve(__dirname, '../contracts/equipment-registry/target/wasm32-unknown-unknown/release/equipment_registry.wasm'),
+    wasmPath: resolve(__dirname, '../contracts/target/wasm32v1-none/release/equipment_registry.wasm'),
   },
   {
     name: 'MaintenanceRecords',
-    wasmPath: resolve(__dirname, '../contracts/maintenance-records/target/wasm32-unknown-unknown/release/maintenance_records.wasm'),
+    wasmPath: resolve(__dirname, '../contracts/target/wasm32v1-none/release/maintenance_records.wasm'),
   },
   {
     name: 'MultiPartyApproval',
-    wasmPath: resolve(__dirname, '../contracts/multi-party-approval/target/wasm32-unknown-unknown/release/multi_party_approval.wasm'),
+    wasmPath: resolve(__dirname, '../contracts/target/wasm32v1-none/release/multi_party_approval.wasm'),
   },
   {
     name: 'ComplianceAttestation',
-    wasmPath: resolve(__dirname, '../contracts/compliance-attestation/target/wasm32-unknown-unknown/release/compliance_attestation.wasm'),
+    wasmPath: resolve(__dirname, '../contracts/target/wasm32v1-none/release/compliance_attestation.wasm'),
+  },
+  {
+    name: 'IdentityRegistry',
+    wasmPath: resolve(__dirname, '../contracts/target/wasm32v1-none/release/identity_registry.wasm'),
   },
 ];
 
-async function deployContract(deployerKp, contract) {
+/// Run a Stellar CLI command with the given args array.
+/// Returns stdout trimmed, or throws on nonzero exit.
+function runStellar(args) {
+  const result = spawnSync(STELLAR_BINARY, args, {
+    encoding: 'utf-8',
+    timeout: 60_000,
+  });
+
+  if (result.error) {
+    throw new Error(`CLI spawn error: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.trim() || '(no stderr)';
+    throw new Error(`CLI exited with status ${result.status}: ${stderr}`);
+  }
+
+  return result.stdout.trim();
+}
+
+/// Build the base CLI args that are common to all commands.
+function baseArgs() {
+  return [
+    '--source', DEPLOYER_SECRET,
+    '--rpc-url', RPC_URL,
+    '--network-passphrase', NETWORK_PASSPHRASE,
+  ];
+}
+
+/// Install WASM and return the hash.
+function installWasm(wasmPath) {
+  const args = [
+    'contract', 'install',
+    '--wasm', wasmPath,
+    ...baseArgs(),
+  ];
+
+  console.log(`  Installing WASM: ${basename(wasmPath)}`);
+  const stdout = runStellar(args);
+  const hash = stdout.trim();
+  if (!hash || hash.length !== 64) {
+    throw new Error(`Unexpected install output: "${stdout}"`);
+  }
+  console.log(`  WASM hash: ${hash}`);
+  return hash;
+}
+
+/// Deploy a contract from a WASM hash and return the contract ID.
+function deployContract(wasmHash) {
+  const args = [
+    'contract', 'deploy',
+    '--wasm-hash', wasmHash,
+    ...baseArgs(),
+  ];
+
+  console.log(`  Deploying contract from hash: ${wasmHash}`);
+  const stdout = runStellar(args);
+  const contractId = stdout.trim();
+  if (!contractId || contractId.length !== 56) {
+    throw new Error(`Unexpected deploy output: "${stdout}"`);
+  }
+  console.log(`  Contract ID: ${contractId}`);
+  return contractId;
+}
+
+/// Deploy a single contract: install WASM, then deploy from hash.
+function deployOne(contract) {
   console.log(`\n--- Deploying ${contract.name} ---`);
 
   if (!existsSync(contract.wasmPath)) {
     console.error(`  SKIP: WASM not found at ${contract.wasmPath}`);
     console.error(`  Build it first:`);
-    console.error(`    cd contracts/${contract.name.toLowerCase().replace(/ /g, '-')} && cargo build --target wasm32-unknown-unknown --release`);
+    console.error(`    cd contracts && cargo build --target wasm32v1-none --release`);
     return null;
   }
 
-  const wasm = readFileSync(contract.wasmPath);
-
   try {
-    // Upload WASM blob via Soroban RPC installContractCode
-    const installRes = await fetch(`${RPC_URL}/installContractCode`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contract_code: wasm.toString('base64'),
-        source_account: deployerKp.publicKey(),
-      }),
-    });
-
-    if (!installRes.ok) {
-      const err = await installRes.text();
-      throw new Error(`Install failed: ${err}`);
-    }
-
-    const installResult = await installRes.json();
-    const wasmHash = installResult.hash;
-    console.log(`  WASM uploaded, hash: ${wasmHash}`);
-
-    // Deploy contract from WASM hash
-    const deployRes = await fetch(`${RPC_URL}/deployContract`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        wasm_hash: wasmHash,
-        source_account: deployerKp.publicKey(),
-      }),
-    });
-
-    if (!deployRes.ok) {
-      const err = await deployRes.text();
-      throw new Error(`Deploy failed: ${err}`);
-    }
-
-    const deployResult = await deployRes.json();
-    const contractId = deployResult.contract_id || deployResult.id;
-    console.log(`  Deployed at: ${contractId}`);
+    const wasmHash = installWasm(contract.wasmPath);
+    const contractId = deployContract(wasmHash);
     return contractId;
   } catch (e) {
     console.error(`  Failed: ${e.message}`);
@@ -98,17 +134,20 @@ async function deployContract(deployerKp, contract) {
   }
 }
 
-async function main() {
+function main() {
   const deployerKp = Keypair.fromSecret(DEPLOYER_SECRET);
+  const publicKey = deployerKp.publicKey();
 
-  console.log(`Deploying contracts using account: ${deployerKp.publicKey()}`);
+  console.log(`Deploying contracts using account: ${publicKey}`);
   console.log(`Soroban RPC: ${RPC_URL}`);
+  console.log(`Network: ${NETWORK_PASSPHRASE}`);
+  console.log('Stellar CLI:', STELLAR_BINARY);
   console.log('');
 
   const results = {};
 
   for (const contract of CONTRACTS) {
-    const contractId = await deployContract(deployerKp, contract);
+    const contractId = deployOne(contract);
     if (contractId) {
       results[contract.name] = contractId;
     }
@@ -127,4 +166,4 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+main();

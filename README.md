@@ -12,7 +12,7 @@
 
 ## Abstract
 
-MaintChain prevents falsification of industrial maintenance records by enforcing a **multi-party approval workflow on-chain**. A maintenance record is only considered compliant after independent roles (technician, supervisor, optionally auditor) have recorded their approvals via Soroban smart contracts on Stellar Testnet. Evidence files remain off-chain; only cryptographic hashes are stored on-chain. The project ships a full stack: four Soroban contracts (Rust, `no_std`), an Axum REST backend (Rust, Postgres), a Next.js frontend with Freighter wallet integration, and automated contract deployment scripts.
+MaintChain prevents falsification of industrial maintenance records by enforcing a **multi-party approval workflow on-chain**. A maintenance record is only considered compliant after independent roles (technician, supervisor, optionally auditor) have recorded their approvals via Soroban smart contracts on Stellar Testnet. Evidence files remain off-chain; only cryptographic hashes are stored on-chain. The project ships a full stack: five Soroban contracts (Rust, `no_std`), an Axum REST backend (Rust, Postgres), a Next.js frontend with Freighter wallet integration, and automated contract deployment scripts.
 
 ---
 
@@ -69,7 +69,7 @@ For a detailed breakdown of the problem, industry impact, and use-case scenarios
 ![Mobile Responsive](Mobile-responsive-proof.png)
 
 
-### Smart Contracts (4 crates)
+### Smart Contracts (5 crates)
 
 Each contract is an independent Soroban crate compiled to WASM (`wasm32v1-none`):
 
@@ -80,6 +80,8 @@ Each contract is an independent Soroban crate compiled to WASM (`wasm32v1-none`)
 3. **MultiPartyApproval** — Tracks approval state per maintenance ID across three roles: technician, supervisor, and optionally auditor. `verify_compliance` returns true only when all required approvals are satisfied. This is the **enforcement point**: no off-chain logic can mark a record compliant without the on-chain approval bitmap.
 
 4. **ComplianceAttestation** — Issues a final certificate (attestation) containing the issuer address, cert hash, and timestamp. The `issue_certificate` function performs cross-contract calls to verify compliance before minting.
+
+5. **IdentityRegistry** — Records identity verification events per Stellar wallet. Stores role code, organization hash, profile hash, ledger timestamp, and version for forward compatibility. Supports re-verification (version bump). Used by the `/get-verified` flow to produce a dedicated Freighter-signed Soroban transaction as proof of identity.
 
 > For a detailed technical deep-dive on each contract — including data structures, function signatures, test coverage, and deployment addresses — see [STELLAR_INTEGRATION.md](./STELLAR_INTEGRATION.md#4-contract-deep-dives).
 
@@ -129,11 +131,12 @@ Detailed per-stage data (asset, urgency, trust score, evidence media, part trace
 │       └── 0002_blockchain_integration.sql  # Contract address + tx_id columns
 │
 ├── contracts/                        # Soroban smart contracts (Rust, no_std)
-│   ├── Cargo.toml                    # Workspace with 4 members
+│   ├── Cargo.toml                    # Workspace with 5 members
 │   ├── equipment-registry/           # Equipment registration + versioned snapshots
 │   ├── maintenance-records/          # Maintenance order state machine
 │   ├── multi-party-approval/         # Approval state bitmap (tech/supervisor/auditor)
-│   └── compliance-attestation/       # Certificate issuance + eligibility check
+│   ├── compliance-attestation/       # Certificate issuance + eligibility check
+│   └── identity-registry/            # Identity verification + wallet attestation
 │
 ├── frontend/                         # Next.js 14 app (App Router)
 │   ├── package.json                  # deps: next 14.2, react 18, stellar-sdk 13, freighter-api 6
@@ -147,12 +150,15 @@ Detailed per-stage data (asset, urgency, trust score, evidence media, part trace
 │   │   │   ├── technician/           # Technician task list
 │   │   │   ├── workers/              # Worker discovery + profiles
 │   │   │   ├── machines/             # Machine passport directory
-│   │   │   ├── certificates/         # Certificate registry
-│   │   │   ├── live-network/         # Real-time activity feed
-│   │   │   ├── leaderboard/          # Global trust rankings
-│   │   │   ├── industries/           # Industry coverage
-│   │   │   └── docs, privacy,
-│   │   │       terms, contact/       # Coming soon (Q3 2026)
+│   │   ├── get-verified/         # Identity verification flow (7-stage state machine)
+│   │   ├── certificates/         # Certificate registry
+│   │   ├── live-network/         # Real-time activity feed
+│   │   ├── leaderboard/          # Global trust rankings
+│   │   ├── industries/           # Industry coverage
+│   │   ├── docs/                 # Coming soon (Q3 2026)
+│   │   ├── privacy/              # Coming soon (Q3 2026)
+│   │   ├── terms/                # Coming soon (Q3 2026)
+│   │   └── contact/              # Coming soon (Q3 2026)
 │   │   ├── components/
 │   │   │   ├── maintchain/           # UI component library
 │   │   │   │   ├── ui.tsx            # EditorialSectionHeader, StatusBadge, ProfileCard, etc.
@@ -215,6 +221,7 @@ Expected WASM artifacts:
 | MaintenanceRecords | `target/wasm32v1-none/release/maintenance_records.wasm` |
 | MultiPartyApproval | `target/wasm32v1-none/release/multi_party_approval.wasm` |
 | ComplianceAttestation | `target/wasm32v1-none/release/compliance_attestation.wasm` |
+| IdentityRegistry | `target/wasm32v1-none/release/identity_registry.wasm` |
 
 > **Important:** Use **release** WASM for deployment. Debug WASM artifacts can exceed the Soroban RPC payload limit (HTTP 413).
 
@@ -241,8 +248,11 @@ This starts Postgres 16 on port 5432 with user/password/database `maintchain`.
 cd backend
 # Environment variable priority: POSTGRES_URL > DATABASE_URL > default local
 export DATABASE_URL="postgres://maintchain:maintchain@localhost:5432/maintchain"
+export IDENTITY_REGISTRY_CONTRACT_ID="<deployed_contract_id>"
 cargo run
 ```
+
+> **Note:** The `IDENTITY_REGISTRY_CONTRACT_ID` env var is required for the `/verification/readiness` endpoint to report `identity_registry_configured: true`. The backend will warn on startup if this is not set.
 
 The backend listens on `http://127.0.0.1:8081`.
 
@@ -282,6 +292,7 @@ NEXT_PUBLIC_EQUIPMENT_REGISTRY_ID=<contract_id>
 NEXT_PUBLIC_MAINTENANCE_RECORDS_ID=<contract_id>
 NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID=<contract_id>
 NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID=<contract_id>
+NEXT_PUBLIC_IDENTITY_REGISTRY_ID=<contract_id>
 ```
 
 ### 6. Start Frontend
@@ -382,6 +393,7 @@ curl -X POST http://localhost:8081/hash/evidence \
 | `/machines/:id` | Machine detail with event timeline and certificates |
 | `/certificates` | Certificate registry |
 | `/certificates/:id` | Certificate detail with approval chain and blockchain record |
+| `/get-verified` | Identity verification: 7-stage flow with Freighter signature, on-chain proof, and backend mirror |
 | `/leaderboard` | Global trust rankings: top workers, trust growth, evidence quality, zero-complaint |
 | `/industries` | Industry coverage (manufacturing, automotive, mining, energy, etc.) |
 | `/dashboard` | Worker dashboard: trust score SVG radial, weekly rank progress, mini activity chart |
@@ -398,10 +410,11 @@ The following contracts are deployed on Stellar Testnet:
 
 | Contract | Deploy TX | Contract Address |
 |----------|-----------|------------------|
-| MultiPartyApproval | [f637…ac53](https://stellar.expert/explorer/testnet/tx/f6378948f57e4d6555308c39e1e3cdc5e61522eb18119a84194299b8dda0ac53) | [`CBPH…JOYH`](https://lab.stellar.org/r/testnet/contract/CBPHZFRYKSE6PUWHU2HSNQTWBQ47GYV3U73KXPSOPIX3QLQJ7MLSJOYH) |
-| EquipmentRegistry | [037c…7863](https://stellar.expert/explorer/testnet/tx/037c5b9f2204df92e975111e9d7d96027b90b9ae26c89aaeccf595414fab7863) | [`CAT5…WEW`](https://lab.stellar.org/r/testnet/contract/CAT57KYD2WU5QMNBSGB4FJQ37JUUQRKFDMZVPTJZVFC2H44EKWKZWWEW) |
-| MaintenanceRecords | [bb8e…aae](https://stellar.expert/explorer/testnet/tx/bb8e10e0d5ce6d85e5019d5da8650e6cd1ec85c05f937041183c7097c1b06aae) | [`CBRI…775Z`](https://lab.stellar.org/r/testnet/contract/CBRIGG27YRAXG5H74ZOWSSJGMSTPQHZXJCDXA23QSSBIH6VYZZR4775Z) |
-| ComplianceAttestation | [295c…1ef](https://stellar.expert/explorer/testnet/tx/295cf00852671856ea524a69bafd2bc1c159a73d18ffc411749fc6312f11b1ef) | [`CBR4…VIN`](https://lab.stellar.org/r/testnet/contract/CBR4HHPWRDXMJJOG65B6I5TRIBBUFAXAMUCTAJANAPBAIJHPKRUTCVIN) |
+| IdentityRegistry | *(deployed via stellar CLI)* | `CCCKDY2NIQOHKEFB6BIGYZYEW6YAMRBMLYP3HEDYCYHAMZQUDY26BXNW` |
+| MultiPartyApproval | *(re-deployed)* | `CDGJ6VX3TG4M66SBFS5LCBPTF26GEFRZXXAYNYAWYRYHG2WDJ7UYAZSC` |
+| EquipmentRegistry | *(re-deployed)* | `CBTOLJE5FVYO4Y473OIZIBX3OAAZAKCRODZ4LI56Q5UYMQTXRUSVC2EO` |
+| MaintenanceRecords | *(re-deployed)* | `CDZ324UZJCIKG32YKY4MFZX5AO63VXCK73NO5QS3QI3256UDBYR5LP6M` |
+| ComplianceAttestation | *(re-deployed)* | `CDDMPFXM3DMXZBMKBQR4UBSOXB5XZIDLVAJGX3L7D4C6TTFXGKY7EGU2` |
 
 ### Deploying Contracts Yourself
 
@@ -434,6 +447,7 @@ cargo test -p equipment-registry
 cargo test -p maintenance-records
 cargo test -p multi-party-approval
 cargo test -p compliance-attestation
+cargo test -p identity-registry
 ```
 
 Snapshot tests for `equipment-registry` are stored in `contracts/equipment-registry/test_snapshots/tests/`.
@@ -470,6 +484,23 @@ A complete demo scenario (including a rejected supervisor submission followed by
 5. Audit trail retrieval
 6. Compliance certificate issuance
 
+### Get Verified Demo Checklist
+
+A complete end-to-end demo of the identity verification flow:
+
+1. Open `/get-verified`
+2. Click **Start Verification**
+3. Connect Freighter wallet on Stellar Testnet
+4. Confirm balance is visible
+5. Approve the wallet signature challenge
+6. Backend readiness check passes (database + contract configured)
+7. Create user profile (name, role, organization) or skip if already registered
+8. Review verification payload
+9. Sign `IdentityRegistry.verify_identity` transaction in Freighter
+10. Wait for transaction confirmation
+11. Backend mirror syncs record to Postgres
+12. Success page shows transaction hash, explorer link, and contract ID
+
 
 
 ---
@@ -495,6 +526,7 @@ All landing page components pass visual inspection with zero console errors (ver
 - **MaintenanceRecords**: CRUD operations for the maintenance order state machine
 - **MultiPartyApproval**: Approval bitmap with configurable auditor requirement
 - **ComplianceAttestation**: Certificate issuance with cross-contract invocation scaffolded
+- **IdentityRegistry**: 6 unit tests covering verification storage, pre-verification state, re-verification version bumps, field preservation, wallet isolation, and is_verified state transitions
 
 ### Monitoring & Analytics
 
@@ -515,7 +547,7 @@ MaintChain integrates **Sentry** for error tracking and performance monitoring a
 | Frontend | Vercel | Import this GitHub repo via [vercel.com](https://vercel.com) |
 | Backend (Rust API) | Render | `https://maintchain.onrender.com` |
 | Database | Supabase | Supabase Postgres via pooler.supabase.com |
-| Smart Contracts | Stellar Testnet | 4 Soroban contracts (see [deployment table](#testnet-contract-deployments)) |
+| Smart Contracts | Stellar Testnet | 5 Soroban contracts (see [deployment table](#testnet-contract-deployments)) |
 
 ### Frontend (Vercel) Deployment
 
@@ -537,6 +569,7 @@ The frontend is a Next.js 14 app (App Router) ready for Vercel deployment:
    NEXT_PUBLIC_MAINTENANCE_RECORDS_ID=CBRIGG27YRAXG5H74ZOWSSJGMSTPQHZXJCDXA23QSSBIH6VYZZR4775Z
    NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID=CBPHZFRYKSE6PUWHU2HSNQTWBQ47GYV3U73KXPSOPIX3QLQJ7MLSJOYH
    NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID=CBR4HHPWRDXMJJOG65B6I5TRIBBUFAXAMUCTAJANAPBAIJHPKRUTCVIN
+   NEXT_PUBLIC_IDENTITY_REGISTRY_ID=<deployed_contract_id>
    ```
 
 5. **Deploy!** Vercel builds and deploys automatically. Each push to `main` triggers a redeployment.

@@ -73,7 +73,7 @@ export default function Hero() {
               Find Trusted Experts <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
-              href="/dashboard"
+              href="/get-verified"
               className="inline-flex items-center gap-2 rounded-full border border-slate-300/50 bg-white/70 px-6 py-3 text-sm font-semibold text-slate-900 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-blue-400/30 hover:shadow-[0_0_24px_rgba(37,99,235,0.12)]"
             >
               Become Verified
