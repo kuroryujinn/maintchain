@@ -182,6 +182,7 @@ External parties who need to verify compliance without relying on any single org
 | **Frontend** | Next.js 14 (App Router) | Web application, Freighter integration |
 | **Styling** | Tailwind CSS v4 | Editorial + Glass design system |
 | **Wallet** | Freighter Browser Extension | Stellar key management & transaction signing |
+| **Authentication** | SEP-53 challenge-response | Wallet signature verification ↦ HMAC session cookie |
 | **Monitoring** | Sentry | Error tracking & performance monitoring |
 | **Hosting** | Vercel (frontend) + Render (backend) | Production deployment |
 

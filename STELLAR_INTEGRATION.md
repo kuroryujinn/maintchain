@@ -369,7 +369,158 @@ export function toBytesN32(str: string): string {
 
 ---
 
-## 6. Backend → Contract Integration
+## 6. Wallet Verification & Session Auth
+
+MaintChain implements a challenge-response wallet verification flow (option-(c) per-user auth) that proves a browser session is controlled by the owner of a Stellar wallet.
+
+### 6.1 Two-Layer Auth Architecture
+
+```
+Layer 1: MAINTCHAIN_API_KEY (server-to-server)
+  Next.js proxy ──Bearer──► Rust backend
+  Purpose: Only the proxy can talk to the backend
+
+Layer 2: Wallet signature session (per-user)
+  Browser ──signed challenge──► proxy ──► backend
+  Purpose: Proves the user owns their Stellar wallet
+```
+
+### 6.2 Challenge-Response Flow (SEP-53)
+
+The wallet verification uses Freighter's `signMessage` API, which follows **SEP-53** (Sign and Verify Messages). The flow is:
+
+```
+Browser                          Proxy                         Backend
+  │                                │                              │
+  │── POST /api/auth/challenge ───►─────── /auth/challenge ─────►  │
+  │                                │    Generate 32-byte nonce     │
+  │                                │    Store message in DB        │
+  │◄── { message, expires_at } ───◄─────── { message } ──────────◄│
+  │                                │                              │
+  │── Freighter signMessage() ────►                                │
+  │   SEP-53:                                                     │
+  │   1. payload = "Stellar Signed    \n" + message               │
+  │   2. hash = SHA256(payload)                                   │
+  │   3. signature = Ed25519_sign(hash)                            │
+  │◄── { signedMessage } ─────────                                │
+  │                                │                              │
+  │── POST /api/auth/verify ──────►─────── /auth/verify ─────────►│
+  │   { nonce, signature }        │   1. Look up stored message   │
+  │                               │   2. Decode G... → pubkey     │
+  │                               │   3. SEP-53: SHA256("Stellar  │
+  │                               │      Signed Message:\n" + msg)│
+  │                               │   4. Ed25519_verify(sig, hash)│
+  │◄── 200 + Set-Cookie ─────────◄─────── { verified: true } ────◄│
+```
+
+#### Key Cryptographic Detail (SEP-53)
+
+The critical step that was discovered during debugging: Freighter v6's `signMessage` does NOT sign the raw message. It **prepends a domain-separation prefix** before hashing:
+
+```rust
+// Freighter v6 signMessage implements SEP-53:
+//   signature = Ed25519_sign(SHA256("Stellar Signed Message:\n" + message))
+
+// Backend verify_challenge must match:
+use sha2::{Digest, Sha256};
+
+let mut hasher = Sha256::new();
+hasher.update(b"Stellar Signed Message:\n");  // ← SEP-53 prefix (critical!)
+hasher.update(stored_nonce.as_bytes());
+let message_hash = hasher.finalize();
+
+let verified = verifying_key.verify(&message_hash, &signature).is_ok();
+```
+
+Omitting this prefix causes `"Signature does not match"` — the hashes differ because Freighter includes the prefix while the backend doesn't.
+
+### 6.3 Proxy Session Management
+
+The Next.js API proxy at `frontend/src/app/api/[...proxy]/route.ts` handles session issuance and validation:
+
+**On successful /api/auth/verify:**
+1. Backend returns `{ verified: true, stellar_address }`
+2. Proxy creates an HMAC-SHA256 signed session cookie:
+   ```
+   cookie = base64(stellar_address | expires_at | HMAC(secret, stellar_address | expires_at))
+   ```
+3. Cookie is `HttpOnly; SameSite=Lax; Path=/api`
+4. `Secure` flag is ONLY set in production (`NODE_ENV === 'production'`) — local dev (HTTP) would silently reject a Secure cookie
+
+**On every other request:**
+1. Proxy reads the session cookie
+2. Validates HMAC signature + expiry
+3. If valid, injects `X-User-Address` header when forwarding to backend
+4. If invalid/expired, clears the cookie and returns 401
+
+### 6.4 Frontend Hook (`useSoroban.ts`)
+
+The `connectWallet()` function orchestrates the full auth flow:
+
+```typescript
+const connectWallet = useCallback(async (): Promise<boolean> => {
+  // 1. Request Freighter access → get G... address
+  // 2. Call POST /api/auth/challenge → get message
+  // 3. Call Freighter signMessage(message) → get signature
+  // 4. Call POST /api/auth/verify → proxy sets cookie
+  // 5. Return true (success) or false (failure, wallet disconnected)
+}, [...],
+```
+
+Key design decisions:
+- `connectWallet` returns `Promise<boolean>` so callers can check success immediately (avoids stale React closure issues)
+- On failure, the wallet is automatically disconnected and `walletError` is set for the UI
+- A `sessionChecked` state gates the auto-connect effect, preventing a race between `readPersistedAddress` (localStorage restore) and `checkSession` (session cookie verification)
+
+### 6.5 Error Handling
+
+The `verifyWallet` function captures error responses from both JSON and plain-text backends:
+
+```typescript
+if (!verifyRes.ok) {
+  const contentType = verifyRes.headers.get('content-type') || '';
+  if (contentType.includes('json')) {
+    const errBody = await verifyRes.json();
+    errorMessage = errBody?.error?.message;
+  } else {
+    errorMessage = await verifyRes.text();  // plain text from Axum (StatusCode, String)
+  }
+}
+```
+
+This handles Axum's `(StatusCode, String)` error format where the body is `text/plain`.
+
+### 6.6 Environment Variables
+
+```env
+# Frontend (server-side only — NOT NEXT_PUBLIC_)
+BACKEND_URL=https://maintchain-backend.onrender.com
+MAINTCHAIN_API_KEY=<shared_secret>
+AUTH_SECRET=<random_hmac_secret>  # For signing session cookies
+```
+
+```env
+# Backend
+MAINTCHAIN_API_KEY=<shared_secret>  # Must match frontend
+SENTRY_DSN=                         # Optional, Sentry is no-op if unset
+```
+
+### 6.7 Auth-Exempt Routes
+
+The following paths are exempt from session validation (they are the auth entry points):
+- `/api/auth/challenge` — POST, public
+- `/api/auth/verify` — POST, public (proxy creates session cookie on success)
+- `/api/auth/logout` — POST, public (clears session cookie)
+- `/api/auth/me` — GET, public (returns session status)
+- `/health` — GET, public (no API key or session required)
+- `/auth/challenge` — POST, public (same, without `/api` prefix)
+- `/auth/verify` — POST, public (same, without `/api` prefix)
+
+All other routes require both:
+1. `Authorization: Bearer <MAINTCHAIN_API_KEY>` header (injected by proxy)
+2. Valid session cookie → `X-User-Address` header (for per-user identity enforcement)
+
+## 7. Backend → Contract Integration
 
 ### 6.1 SorobanClient (`backend/src/soroban_client.rs`)
 
@@ -400,7 +551,7 @@ pub async fn issue_certificate(&self, ...) -> Result<String, StatusCode> {
 
 ---
 
-## 7. Contract Deployment Pipeline
+## 8. Contract Deployment Pipeline
 
 ### 7.1 Deployment Script
 
@@ -444,7 +595,7 @@ DEPLOYER_SECRET_KEY=<testnet_secret_key>  # Required for full signing
 
 ---
 
-## 8. Testing & Validation
+## 9. Testing & Validation
 
 ### 8.1 Contract Unit Tests
 
@@ -478,7 +629,7 @@ The build generates 18 static pages. All contract interaction code is validated 
 
 ---
 
-## 9. Known Limitations & Roadmap
+## 10. Known Limitations & Roadmap
 
 | Limitation | Impact | Target |
 |-----------|--------|--------|
