@@ -1,6 +1,6 @@
 # ── MaintChain Deploy Pipeline ──
 # Deploys to production on push to main (after CI passes).
-# - Frontend → Vercel via vercel-deploy action
+# - Frontend → Vercel via Vercel CLI (prebuilt flow)
 # - Backend → Render.com via Deploy Hook webhook
 #
 # Prerequisites:
@@ -23,32 +23,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
-        working-directory: frontend
+      # ─── Vercel Prebuilt Deployment Flow ────────────────
+      # Root vercel.json sets rootDirectory: frontend for discoverability.
+      # We also pass --cwd frontend explicitly for belt-and-suspenders.
+      # Environment variables (NEXT_PUBLIC_*) are fetched from Vercel
+      # project settings via `vercel pull`, so ensure they are
+      # configured there for the Production environment.
 
-      - name: Build (production)
-        run: npm run build
-        working-directory: frontend
+      - name: Pull Vercel Environment
+        run: npx --yes vercel@latest pull --yes --environment=production --cwd frontend --token="${{ secrets.VERCEL_TOKEN }}"
         env:
-          NEXT_PUBLIC_SOROBAN_RPC_URL: ${{ vars.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org' }}
-          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://maintchain-backend.onrender.com' }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      # Vercel deploy runs from project root (where vercel.json lives), not from frontend/
+      - name: Build Project Artifacts
+        run: npx --yes vercel@latest build --prod --cwd frontend --token="${{ secrets.VERCEL_TOKEN }}"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
       - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod'
+        run: npx --yes vercel@latest deploy --prebuilt --prod --cwd frontend --token="${{ secrets.VERCEL_TOKEN }}"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
   # ─── Deploy Backend to Render ──────────────────────
   backend:
