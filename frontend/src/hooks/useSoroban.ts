@@ -282,9 +282,13 @@ export const useSoroban = () => {
       return true;
     } catch (e: any) {
       const msg = e?.message || String(e);
+      // Store the error for the UI badge, AND surface it via the return value
+      // so connectWallet can read it immediately without a stale closure.
       setSessionError(msg);
       setSessionVerified(false);
-      return false;
+      // Re-throw with the message so the caller can catch it directly.
+      // This avoids the stale-closure problem of reading sessionError state.
+      throw e;
     } finally {
       setSessionVerifying(false);
     }
@@ -327,15 +331,10 @@ export const useSoroban = () => {
       await validateNetwork();
       await refreshBalance(authAddress);
 
-      // After wallet connects, verify ownership via challenge-response
-      // The proxy sets an httpOnly session cookie on success
-      const verified = await verifyWallet(authAddress);
-      if (!verified) {
-        // If verification failed, propagate the session error to walletError
-        // so the UI can display it prominently instead of just the badge tooltip
-        const errMsg = sessionError || 'Wallet verification failed';
-        throw new Error(errMsg);
-      }
+      // After wallet connects, verify ownership via challenge-response.
+      // verifyWallet now throws on failure (with the error message), so
+      // the outer catch block will set walletError and disconnect cleanly.
+      await verifyWallet(authAddress);
     } catch (e: any) {
       setWalletError({
         message: e?.message ? String(e.message) : 'Freighter connection failed.',
