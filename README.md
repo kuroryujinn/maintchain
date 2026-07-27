@@ -544,7 +544,7 @@ MaintChain integrates **Sentry** for error tracking:
 
 4. **API authentication is demo-grade.** An `Authorization: Bearer` header check (`API_KEY_ENV`) exists but is not wired into the router. The backend trusts all origins via `CorsLayer::permissive()` in development.
 
-5. **Database URL handling.** The backend appends `?sslmode=require` to non-HTTPS connection strings. This works for Supabase and standard Postgres but may conflict with connection poolers.
+5. **Database URL handling.** The backend appends `?sslmode=require` to Postgres connection strings that use a plain `postgres://` scheme (no SSL params present). This works for Supabase and standard Postgres but may conflict with connection poolers.
 
 6. **Placeholder pages.** Routes `/docs`, `/privacy`, `/terms`, `/contact` render generic placeholders.
 
