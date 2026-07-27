@@ -31,26 +31,26 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       # ─── Vercel Prebuilt Deployment Flow ────────────────
-      # vercel.json and the actual Next.js project live in frontend/,
-      # so all Vercel CLI commands use --cwd frontend.
+      # Vercel project settings (Root Directory: frontend) route
+      # all CLI commands to frontend/ automatically. No --cwd needed.
       # Environment variables (NEXT_PUBLIC_*) are fetched from Vercel
       # project settings via `vercel pull`, so ensure they are
       # configured there for the Production environment.
 
       - name: Pull Vercel Environment
-        run: npx --yes vercel@latest pull --yes --environment=production --cwd frontend --token="${{ secrets.VERCEL_TOKEN }}"
+        run: npx --yes vercel@latest pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Build Project Artifacts
-        run: npx --yes vercel@latest build --prod --cwd frontend --token="${{ secrets.VERCEL_TOKEN }}"
+        run: npx --yes vercel@latest build --prod --token="${{ secrets.VERCEL_TOKEN }}"
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Deploy to Vercel
-        run: npx --yes vercel@latest deploy --prebuilt --prod --cwd frontend --token="${{ secrets.VERCEL_TOKEN }}"
+        run: npx --yes vercel@latest deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
