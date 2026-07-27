@@ -1134,8 +1134,16 @@ async fn main() -> anyhow::Result<()> {
     // - Docker: WORKDIR=/app, migrations at /app/migrations/ → "migrations"
     // - Local: run from backend/ → "migrations" resolves to backend/migrations/
     let migrator = Migrator::new(std::path::Path::new("migrations")).await?;
-    migrator.run(&db).await?;
-    info!("Database migrations applied successfully");
+    let skip_migrations_on_error = std::env::var("SKIP_MIGRATIONS_ON_ERROR").is_ok();
+    if skip_migrations_on_error {
+        match migrator.run(&db).await {
+            Ok(_) => info!("Database migrations applied successfully"),
+            Err(e) => warn!("Database migration skipped (SKIP_MIGRATIONS_ON_ERROR): {e}"),
+        }
+    } else {
+        migrator.run(&db).await?;
+        info!("Database migrations applied successfully");
+    }
 
     let state = AppState { db };
 
