@@ -54,11 +54,71 @@ The gap is not technical capability but **incentive compatibility**: no existing
 │                              │ . SHA-256 hashing         │ │
 │                              └────────────────────────────┘ │
 │                                                             │
-│  Two independent paths: frontend calls Soroban RPC via      │
-│  Freighter for on-chain ops, and REST API for off-chain     │
-│  CRUD workflows.                                            │
+│                                                             │
+│  Two independent paths + proxy auth layer:                   │
+│  · On-chain ops via Freighter → Soroban RPC                  │
+│  · Off-chain CRUD via fetch → Next.js API proxy → backend   │
+│  · Proxy enforces two-layer auth (API key + wallet session)  │
 └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────┐
+  │  Next.js API Proxy                  │
+  │  [...proxy]/route.ts                 │
+  │                                     │
+  │  Layer 1: MAINTCHAIN_API_KEY        │
+  │    → injects Bearer token           │
+  │                                     │
+  │  Layer 2: HMAC-signed session       │
+  │    → validates cookie               │
+  │    → adds X-User-Address header     │
+  │                                     │
+  │  /api/auth/challenge → public       │
+  │  /api/auth/verify    → public       │
+  │  /api/auth/logout    → public       │
+  │  /api/auth/me        → public       │
+  │  everything else     → requires     │
+  │                         session     │
+  └─────────────────────────────────────┘
 ```
+
+### Authentication Model
+
+MaintChain uses a **two-layer authentication architecture**:
+
+| Layer | Type | Mechanism | Purpose |
+|-------|------|-----------|---------|
+| 1 | Server-to-server | `MAINTCHAIN_API_KEY` Bearer token injected by proxy | Only the proxy can call the backend |
+| 2 | Per-user session | SEP-53 challenge-response → HMAC-signed cookie | Proves the browser user owns their wallet |
+
+**Layer 2 — Challenge-Response Flow (SEP-53):**
+
+Freighter v6's `signMessage` follows **SEP-53** (Sign and Verify Messages). The backend verifies the signature using the same algorithm:
+
+```
+Browser                          Proxy                         Backend
+  │                                │                              │
+  │── POST /api/auth/challenge ───►─────── /auth/challenge ─────►│
+  │                                │    Generate 32-byte nonce    │
+  │                                │    Store message in DB       │
+  │◄── { message, expires_at } ───◄─────── { message } ──────────◄│
+  │                                │                              │
+  │── Freighter signMessage() ────►                                │
+  │   SEP-53:                                                    │
+  │   1. SHA256("Stellar Signed Message:\n" + message)            │
+  │   2. Ed25519_sign(hash)                                      │
+  │◄── { signedMessage } ─────────                                │
+  │                                │                              │
+  │── POST /api/auth/verify ──────►─────── /auth/verify ─────────►│
+  │   { nonce, signature }        │   1. Look up stored nonce    │
+  │                               │   2. SHA256("Stellar Signed  │
+  │                               │      Message:\n" + nonce)    │
+  │                               │   3. Ed25519_verify(sig,hash)│
+  │◄── 200 + Set-Cookie ─────────◄─────── { verified:true } ────◄│
+```
+
+On successful verification, the proxy issues an **HttpOnly HMAC-SHA256 signed session cookie**. Every subsequent API request validates this cookie and injects the authenticated user's Stellar address as the `X-User-Address` header. The backend's `identity_middleware` enforces this by rejecting requests where a `stellar_address` field in the JSON body doesn't match the authenticated session.
+
+See [STELLAR_INTEGRATION.md](./STELLAR_INTEGRATION.md#6-wallet-verification--session-auth) for the full cryptographic detail.
 
 ### Design Principles
 
@@ -111,7 +171,9 @@ Five independent Soroban crates, each compiled to WASM (`wasm32v1-none`):
 | **MaintenanceRecords** | Maintenance order state machine (Open -> Submitted -> PendingApproval -> Compliant/Rejected) | `create_record`, `submit_evidence`, `update_status`, `complete_record`, `get_record` |
 | **MultiPartyApproval** | Approval bitmap (tech x supervisor x auditor). **Enforcement point** for compliance | `approve_by_technician`, `approve_by_supervisor`, `approve_by_auditor`, `reject_by_supervisor`, `verify_compliance`, `set_auditor_required` |
 | **ComplianceAttestation** | Final certificate issuance with cross-contract compliance check | `issue_certificate`, `get_attestation` |
-| **IdentityRegistry** | Identity verification per wallet (role, org, profile hash, version) | `verify_identity`, `is_verified`, `get_identity` |
+| **IdentityRegistry** | Identity verification per wallet (role, org, profile hash, version). **Entry point for Get Verified flow** | `verify_identity`, `is_verified`, `get_identity` |
+
+The **Get Verified** flow (`/get-verified`) walks users through a 7-stage identity verification: connect wallet → approve challenge → backend readiness check → create profile → compute SHA-256 identity hashes → sign `IdentityRegistry.verify_identity` transaction in Freighter → confirmation. Once verified, the user's role, organization, and profile hash are recorded on-chain, providing a portable identity that travels with their Stellar wallet across the platform.
 
 Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, and IdentityRegistry have snapshot-based test snapshots in their `test_snapshots/tests/` directories.
 
@@ -272,14 +334,20 @@ NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 NEXT_PUBLIC_API_URL=http://localhost:8081
 ```
 
-Optional -- after deploying contracts:
+Optional — after deploying contracts:
 
 ```env
+# Contract addresses (see Deploying Contracts section)
 NEXT_PUBLIC_EQUIPMENT_REGISTRY_ID=<contract_id>
 NEXT_PUBLIC_MAINTENANCE_RECORDS_ID=<contract_id>
 NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID=<contract_id>
 NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID=<contract_id>
 NEXT_PUBLIC_IDENTITY_REGISTRY_ID=<contract_id>
+
+# Auth (server-side only — NO NEXT_PUBLIC_ prefix, set in Vercel env vars)
+BACKEND_URL=http://localhost:8081          # Rust backend URL
+MAINTCHAIN_API_KEY=<shared_secret>        # Must match backend
+AUTH_SECRET=<random_hmac_secret>          # For signing session cookies
 ```
 
 Start dev server:
@@ -542,7 +610,7 @@ MaintChain integrates **Sentry** for error tracking:
 
 3. **Off-chain evidence storage.** The backend stores evidence hashes but not the evidence files themselves. A production deployment would need IPFS, S3, or equivalent for media storage.
 
-4. **API authentication is demo-grade.** An `Authorization: Bearer` header check (`API_KEY_ENV`) exists but is not wired into the router. The backend trusts all origins via `CorsLayer::permissive()` in development.
+4. **API authentication is partially production-ready.** A two-layer auth system (MAINTCHAIN_API_KEY + session cookie) is fully implemented in the Next.js proxy and backend middleware. The backend still uses `CorsLayer::permissive()` in development for local testing. In production, CORS should be restricted to the frontend domain, and the proxy's `AUTH_SECRET` must be set to a cryptographically random value.
 
 5. **Database URL handling.** The backend appends `?sslmode=require` to Postgres connection strings that use a plain `postgres://` scheme (no SSL params present). This works for Supabase and standard Postgres but may conflict with connection poolers.
 
