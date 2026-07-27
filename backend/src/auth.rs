@@ -174,6 +174,7 @@ pub async fn verify_challenge(
     }
 
     // 2. Verify the Ed25519 signature using stellar-strkey + ed25519-dalek
+    use sha2::{Digest, Sha256};
     use stellar_strkey::Strkey;
     use ed25519_dalek::{Verifier, VerifyingKey};
     use base64::Engine as _;
@@ -214,8 +215,13 @@ pub async fn verify_challenge(
         (StatusCode::BAD_REQUEST, "Invalid signature".to_string())
     })?;
 
+    // SHA-256 hash the message first (matches Freighter's signMessage per SEP-30)
+    let mut hasher = Sha256::new();
+    hasher.update(stored_nonce.as_bytes());
+    let message_hash = hasher.finalize();
+
     // Verify
-    let verified = verifying_key.verify(stored_nonce.as_bytes(), &signature).is_ok();
+    let verified = verifying_key.verify(&message_hash, &signature).is_ok();
 
     if !verified {
         return Err((
