@@ -31,8 +31,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       # ─── Vercel Prebuilt Deployment Flow ────────────────
-      # Root vercel.json sets rootDirectory: frontend for discoverability.
-      # We also pass --cwd frontend explicitly for belt-and-suspenders.
+      # vercel.json and the actual Next.js project live in frontend/,
+      # so all Vercel CLI commands use --cwd frontend.
       # Environment variables (NEXT_PUBLIC_*) are fetched from Vercel
       # project settings via `vercel pull`, so ensure they are
       # configured there for the Production environment.
