@@ -26,6 +26,19 @@ export interface ContractCallResult {
 }
 
 /**
+ * Transaction status reported during contract invocation.
+ * Threaded through invokeContract → callContract → pages for visible UI feedback.
+ */
+export type TxStatus =
+  | { state: 'simulating' }
+  | { state: 'awaiting_signature' }
+  | { state: 'submitting' }
+  | { state: 'pending'; attempt: number; maxAttempts: number }
+  | { state: 'success'; hash: string }
+  | { state: 'timeout'; hash: string }
+  | { state: 'failed'; reason: string };
+
+/**
  * Invoke a read-only (simulate) contract call.
  */
 export async function simulateContract(
@@ -74,12 +87,15 @@ export async function invokeContract(
   method: string,
   args: xdr.ScVal[],
   sourceAddress: string,
+  onStatusChange?: (status: TxStatus) => void,
 ): Promise<ContractCallResult> {
   const errorCtx = `invokeContract(${contractId.slice(0, 8)}…, ${method})`;
   const contract = new Contract(contractId);
   const op = contract.call(method, ...args);
 
   // 1. Get account sequence from Soroban RPC
+  // 1. Get account sequence from Soroban RPC
+  onStatusChange?.({ state: 'simulating' });
   const accountRes = await fetch(
     `${SOROBAN_RPC_URL}/accounts/${encodeURIComponent(sourceAddress)}`,
   );
@@ -96,19 +112,29 @@ export async function invokeContract(
     .build();
 
   // 3. Simulate to get footprint + resource fees
+  onStatusChange?.({ state: 'simulating' });
   const simRes = await fetch(`${SOROBAN_RPC_URL}/simulateTransaction`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ transaction: tx.toXDR() }),
   });
 
-  if (!simRes.ok) throw new Error(`Simulation failed: ${simRes.statusText}`);
+  if (!simRes.ok) {
+    onStatusChange?.({ state: 'failed', reason: `Simulation failed: ${simRes.statusText}` });
+    throw new Error(`Simulation failed: ${simRes.statusText}`);
+  }
   const simulation = await simRes.json();
-  if (simulation.error) throw new Error(`Simulation error: ${simulation.error}`);
+  if (simulation.error) {
+    onStatusChange?.({ state: 'failed', reason: `Simulation error: ${simulation.error}` });
+    throw new Error(`Simulation error: ${simulation.error}`);
+  }
 
   // 4. Build final transaction with soroban data from simulation
   const transactionData = simulation.transactionData;
-  if (!transactionData) throw new Error('Simulation did not return transactionData');
+  if (!transactionData) {
+    onStatusChange?.({ state: 'failed', reason: 'Simulation did not return transactionData' });
+    throw new Error('Simulation did not return transactionData');
+  }
 
   // Parse the base64 transactionData XDR into SorobanTransactionData
   const sorobanData = xdr.SorobanTransactionData.fromXDR(transactionData, 'base64');
@@ -126,32 +152,45 @@ export async function invokeContract(
     .build();
 
   // 5. Sign with Freighter
+  onStatusChange?.({ state: 'awaiting_signature' });
   const finalTxXdr = finalTx.toXDR();
   const signed = await signTransaction(finalTxXdr, {
     networkPassphrase: NETWORK_PASSPHRASE,
     address: sourceAddress,
   });
 
-  if (signed.error) throw new Error(`Freighter signing error: ${signed.error.message}`);
-  if (!signed.signedTxXdr) throw new Error('Signing failed — no signed XDR returned.');
+  if (signed.error) {
+    onStatusChange?.({ state: 'failed', reason: `Freighter signing error: ${signed.error.message}` });
+    throw new Error(`Freighter signing error: ${signed.error.message}`);
+  }
+  if (!signed.signedTxXdr) {
+    onStatusChange?.({ state: 'failed', reason: 'Signing failed — no signed XDR returned.' });
+    throw new Error('Signing failed — no signed XDR returned.');
+  }
 
   // 6. Submit to Soroban RPC
+  onStatusChange?.({ state: 'submitting' });
   const sendRes = await fetch(`${SOROBAN_RPC_URL}/sendTransaction`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ transaction: signed.signedTxXdr }),
   });
 
-  if (!sendRes.ok) throw new Error(`Submit failed: ${sendRes.statusText}`);
+  if (!sendRes.ok) {
+    onStatusChange?.({ state: 'failed', reason: `Submit failed: ${sendRes.statusText}` });
+    throw new Error(`Submit failed: ${sendRes.statusText}`);
+  }
 
   const sendResult = await sendRes.json();
   const txHash: string = sendResult.hash || 'unknown';
   let txStatus = sendResult.status;
 
-  // 7. Poll for completion
+  // 7. Poll for completion with per-attempt status callbacks
+  const MAX_POLL_ATTEMPTS = 15;
   let pollResult: any = null;
   if (txStatus === 'PENDING') {
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+      onStatusChange?.({ state: 'pending', attempt: i + 1, maxAttempts: MAX_POLL_ATTEMPTS });
       await new Promise((r) => setTimeout(r, 1000));
       const pollRes = await fetch(
         `${SOROBAN_RPC_URL}/getTransaction/${encodeURIComponent(txHash)}`,
@@ -164,12 +203,19 @@ export async function invokeContract(
     }
   }
 
+  // Handle timeout (all attempts exhausted, still PENDING)
+  if (txStatus === 'PENDING') {
+    onStatusChange?.({ state: 'timeout', hash: txHash });
+    let errorMsg = `${errorCtx}: Soroban transaction TIMEOUT after ${MAX_POLL_ATTEMPTS}s`;
+    errorMsg += ' (no resultXdr — polling timed out)';
+    throw new Error(errorMsg);
+  }
+
   // Surface full Soroban error details for diagnostics
   if (txStatus === 'FAILED') {
     let errorMsg = `${errorCtx}: Soroban transaction FAILED`;
     if (pollResult?.resultXdr) {
       try {
-        // Extract Soroban host error code from the TransactionResult XDR
         const txResult = xdr.TransactionResult.fromXDR(pollResult.resultXdr, 'base64');
         errorMsg += ` (code: ${txResult.result().switch()})`;
       } catch {
@@ -178,9 +224,11 @@ export async function invokeContract(
     } else {
       errorMsg += ' (no resultXdr — maybe the polling timed out)';
     }
+    onStatusChange?.({ state: 'failed', reason: errorMsg });
     throw new Error(errorMsg);
   }
 
+  onStatusChange?.({ state: 'success', hash: txHash });
   return { transactionHash: txHash, status: 'SUCCESS' };
 }
 

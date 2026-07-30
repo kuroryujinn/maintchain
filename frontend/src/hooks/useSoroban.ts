@@ -19,7 +19,7 @@ import {
 } from '@stellar/stellar-sdk';
 
 
-import { invokeContract, simulateContract, toScVal, bytes32ScVal } from '@/lib/soroban';
+import { invokeContract, simulateContract, toScVal, bytes32ScVal, TxStatus } from '@/lib/soroban';
 import { xdr } from '@stellar/stellar-sdk';
 
 const FREIGHTER_LOCAL_KEY = 'maintchain:freighter:address';
@@ -461,13 +461,13 @@ export const useSoroban = () => {
     [address, networkOk],
   );
 
-  // ── Fixed callContract: uses Soroban service instead of window.Freighter ──
+  // ── callContract with onStatusChange support ──
   const callContract = useCallback(
     async (
       contractId: string,
       functionName: string,
       args: any[],
-      options?: { simulate?: boolean },
+      options?: { simulate?: boolean; onStatusChange?: (status: TxStatus) => void },
     ) => {
       if (!address) throw new Error('Wallet not connected');
 
@@ -484,7 +484,7 @@ export const useSoroban = () => {
         return simulateContract(contractId, functionName, scValArgs);
       }
 
-      return invokeContract(contractId, functionName, scValArgs, address);
+      return invokeContract(contractId, functionName, scValArgs, address, options?.onStatusChange);
     },
     [address],
   );

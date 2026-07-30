@@ -203,7 +203,17 @@ export default function AuditTimeline() {
         const txResult = await callContract(
           COMPLIANCE_ATTESTATION_ID,
           'issue_certificate',
-          [MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID, idBytes32, certHash]
+          [MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID, idBytes32, certHash],
+          {
+            onStatusChange: (status) => {
+              if (status.state === 'simulating') txStateMachine.transition(TxState.SIMULATING);
+              if (status.state === 'awaiting_signature') txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
+              if (status.state === 'submitting') txStateMachine.transition(TxState.SUBMITTING);
+              if (status.state === 'pending') txStateMachine.transition(TxState.PENDING);
+              if (status.state === 'timeout') txStateMachine.setError(TxState.TIMEOUT, `Transaction submitted but not yet confirmed. Hash: ${status.hash}`);
+              if (status.state === 'failed') txStateMachine.setError(TxState.RPC_ERROR, status.reason);
+            },
+          }
         );
         const onChainTx = txResult.transactionHash;
 

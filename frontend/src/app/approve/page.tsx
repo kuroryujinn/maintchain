@@ -75,7 +75,17 @@ export default function ApprovalCenter() {
         const txResult = await callContract(
           MULTI_PARTY_APPROVAL_ID,
           'approve_by_supervisor',
-          [idBytes32, decisionHex, address]
+          [idBytes32, decisionHex, address],
+          {
+            onStatusChange: (status) => {
+              if (status.state === 'simulating') txStateMachine.transition(TxState.SIMULATING);
+              if (status.state === 'awaiting_signature') txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
+              if (status.state === 'submitting') txStateMachine.transition(TxState.SUBMITTING);
+              if (status.state === 'pending') txStateMachine.transition(TxState.PENDING);
+              if (status.state === 'timeout') txStateMachine.setError(TxState.TIMEOUT, `Transaction submitted but not yet confirmed. Hash: ${status.hash}`);
+              if (status.state === 'failed') txStateMachine.setError(TxState.RPC_ERROR, status.reason);
+            },
+          }
         );
         const onChainTx = txResult.transactionHash;
 
@@ -126,7 +136,17 @@ export default function ApprovalCenter() {
         const txResult = await callContract(
           MULTI_PARTY_APPROVAL_ID,
           'reject_by_supervisor',
-          [idBytes32, address]
+          [idBytes32, address],
+          {
+            onStatusChange: (status) => {
+              if (status.state === 'simulating') txStateMachine.transition(TxState.SIMULATING);
+              if (status.state === 'awaiting_signature') txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
+              if (status.state === 'submitting') txStateMachine.transition(TxState.SUBMITTING);
+              if (status.state === 'pending') txStateMachine.transition(TxState.PENDING);
+              if (status.state === 'timeout') txStateMachine.setError(TxState.TIMEOUT, `Transaction submitted but not yet confirmed. Hash: ${status.hash}`);
+              if (status.state === 'failed') txStateMachine.setError(TxState.RPC_ERROR, status.reason);
+            },
+          }
         );
         const onChainTx = txResult.transactionHash;
 

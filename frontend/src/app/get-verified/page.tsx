@@ -296,6 +296,34 @@ export default function GetVerifiedPage() {
           orgHashHex,
           profileHashHex,
         ],
+        {
+          onStatusChange: (status) => {
+            switch (status.state) {
+              case 'awaiting_signature':
+                setStep('signing_transaction');
+                break;
+              case 'submitting':
+                setStep('submitting_transaction');
+                break;
+              case 'pending':
+                setStep('confirming_transaction');
+                break;
+              case 'success':
+                // Handled by existing code after callContract returns
+                break;
+              case 'timeout':
+                setErrorTitle('Transaction Timeout');
+                setErrorMessage(
+                  `Transaction submitted (hash: ${status.hash.slice(0, 8)}...) but confirmation timed out after 15 seconds. Check the explorer for status.`
+                );
+                setStep('error');
+                break;
+              case 'failed':
+                // Will also be caught by the outer try/catch
+                break;
+            }
+          },
+        }
       );
 
       if (!txResult || !txResult.transactionHash) {

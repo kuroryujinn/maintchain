@@ -62,7 +62,17 @@ export default function EvidenceUpload() {
         const txResult = await callContract(
           MAINTENANCE_RECORDS_ID,
           'submit_evidence',
-          [idBytes32, hash.evidence_hash, address]
+          [idBytes32, hash.evidence_hash, address],
+          {
+            onStatusChange: (status) => {
+              if (status.state === 'simulating') txStateMachine.transition(TxState.SIMULATING);
+              if (status.state === 'awaiting_signature') txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
+              if (status.state === 'submitting') txStateMachine.transition(TxState.SUBMITTING);
+              if (status.state === 'pending') txStateMachine.transition(TxState.PENDING);
+              if (status.state === 'timeout') txStateMachine.setError(TxState.TIMEOUT, `Transaction submitted but not yet confirmed. Hash: ${status.hash}`);
+              if (status.state === 'failed') txStateMachine.setError(TxState.RPC_ERROR, status.reason);
+            },
+          }
         );
 
         txStateMachine.transition(TxState.CONFIRMED, { hash: txResult.transactionHash });
