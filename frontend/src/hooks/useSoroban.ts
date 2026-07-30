@@ -20,6 +20,7 @@ import {
 
 
 import { invokeContract, simulateContract, toScVal, bytes32ScVal } from '@/lib/soroban';
+import { xdr } from '@stellar/stellar-sdk';
 
 const FREIGHTER_LOCAL_KEY = 'maintchain:freighter:address';
 const WALLET_CHANGED_EVENT = 'maintchain:soroban-wallet-changed';
@@ -471,6 +472,8 @@ export const useSoroban = () => {
       if (!address) throw new Error('Wallet not connected');
 
       const scValArgs = args.map((arg) => {
+        // Pass through pre-built ScVals (e.g. u32ScVal)
+        if (arg instanceof xdr.ScVal) return arg;
         if (typeof arg === 'string' && /^0x[0-9a-f]{64}$/i.test(arg)) {
           return bytes32ScVal(arg);
         }

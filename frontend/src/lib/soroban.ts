@@ -21,7 +21,8 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 
 export interface ContractCallResult {
   transactionHash: string;
-  status: 'SUCCESS' | 'FAILED';
+  /** Always 'SUCCESS' — invokeContract throws on failure */
+  status: 'SUCCESS';
 }
 
 /**
@@ -74,6 +75,7 @@ export async function invokeContract(
   args: xdr.ScVal[],
   sourceAddress: string,
 ): Promise<ContractCallResult> {
+  const errorCtx = `invokeContract(${contractId.slice(0, 8)}…, ${method})`;
   const contract = new Contract(contractId);
   const op = contract.call(method, ...args);
 
@@ -147,6 +149,7 @@ export async function invokeContract(
   let txStatus = sendResult.status;
 
   // 7. Poll for completion
+  let pollResult: any = null;
   if (txStatus === 'PENDING') {
     for (let i = 0; i < 15; i++) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -154,14 +157,31 @@ export async function invokeContract(
         `${SOROBAN_RPC_URL}/getTransaction/${encodeURIComponent(txHash)}`,
       );
       if (pollRes.ok) {
-        const pollResult = await pollRes.json();
+        pollResult = await pollRes.json();
         txStatus = pollResult.status;
         if (txStatus === 'SUCCESS' || txStatus === 'FAILED') break;
       }
     }
   }
 
-  return { transactionHash: txHash, status: txStatus === 'SUCCESS' ? 'SUCCESS' : 'FAILED' };
+  // Surface full Soroban error details for diagnostics
+  if (txStatus === 'FAILED') {
+    let errorMsg = `${errorCtx}: Soroban transaction FAILED`;
+    if (pollResult?.resultXdr) {
+      try {
+        // Extract Soroban host error code from the TransactionResult XDR
+        const txResult = xdr.TransactionResult.fromXDR(pollResult.resultXdr, 'base64');
+        errorMsg += ` (code: ${txResult.result().switch()})`;
+      } catch {
+        errorMsg += ` (raw resultXdr: ${pollResult.resultXdr.slice(0, 60)}…)`;
+      }
+    } else {
+      errorMsg += ' (no resultXdr — maybe the polling timed out)';
+    }
+    throw new Error(errorMsg);
+  }
+
+  return { transactionHash: txHash, status: 'SUCCESS' };
 }
 
 /**
@@ -199,4 +219,13 @@ export function toBytesN32(str: string): string {
   return '0x' + Array.from(new TextEncoder().encode(str.padEnd(32, '\0')))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+/**
+ * Create an explicit u32 ScVal for passing to Soroban contracts that expect `u32`.
+ * nativeToScVal(number) maps small integers to i32, which causes type mismatch
+ * errors on Soroban contracts expecting u32 parameters.
+ */
+export function u32ScVal(value: number): xdr.ScVal {
+  return xdr.ScVal.scvU32(value);
 }

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, CheckCircle, ExternalLink, Loader2, AlertTriangle, Wallet, Shield, FileCheck, Database, Server, XCircle } from 'lucide-react';
 
 import { useSoroban, IDENTITY_REGISTRY_ID } from '@/hooks/useSoroban';
+import { u32ScVal } from '@/lib/soroban';
 import { api } from '@/lib/api';
 import type { UserResponse } from '@/lib/api-types';
 
@@ -32,7 +33,6 @@ type Step =
   | 'signing_transaction'
   | 'submitting_transaction'
   | 'confirming_transaction'
-  | 'transaction_failed'
   | 'syncing_backend'
   | 'success'
   | 'error';
@@ -96,12 +96,12 @@ function StepIndicator({ current, step, label }: { current: Step; step: Step; la
     'idle', 'connecting_wallet', 'wallet_connected', 'checking_readiness',
     'checking_user', 'user_form', 'registering_user',
     'review_verification', 'computing_hashes', 'signing_transaction',
-    'submitting_transaction', 'confirming_transaction', 'transaction_failed',
+    'submitting_transaction', 'confirming_transaction',
     'syncing_backend', 'success', 'error',
   ];
   const currentIdx = order.indexOf(current);
   const stepIdx = order.indexOf(step);
-  const isPast = stepIdx >= 0 && currentIdx >= 0 && stepIdx < currentIdx && current !== 'error' && current !== 'transaction_failed';
+  const isPast = stepIdx >= 0 && currentIdx >= 0 && stepIdx < currentIdx && current !== 'error';
 
   return (
     <div className={`flex items-center gap-2 ${isPast ? 'text-emerald-600' : isActive ? 'text-blue-600' : 'text-slate-300'}`}>
@@ -292,7 +292,7 @@ export default function GetVerifiedPage() {
         'verify_identity',
         [
           soroban.address,
-          roleCode,
+          u32ScVal(roleCode),  // explicit u32 to match contract signature
           orgHashHex,
           profileHashHex,
         ],
@@ -304,15 +304,6 @@ export default function GetVerifiedPage() {
 
       setTxHash(txResult.transactionHash);
       setContractIdDisplay(IDENTITY_REGISTRY_ID);
-
-      if (txResult.status === 'FAILED') {
-        setStep('transaction_failed');
-        setError(
-          'Transaction Failed',
-          `The Soroban transaction was submitted but failed. Check the explorer for details.`
-        );
-        return;
-      }
 
       setStep('confirming_transaction');
 
@@ -605,25 +596,6 @@ export default function GetVerifiedPage() {
               Cancel
             </button>
           </div>
-        </div>
-      )}
-
-      {/* ─── Transaction Failed (with option to retry) ─── */}
-      {step === 'transaction_failed' && (
-        <div className="space-y-6">
-          <ErrorPanel
-            title="Transaction Failed"
-            message="The Soroban transaction was submitted but failed. This can happen if the contract is not deployed or the parameters are invalid."
-            onRetry={handleExecuteVerification}
-            actionLabel="View Transaction"
-            actionHref={txHash ? `${STELLAR_EXPLORER_TX}/${txHash}` : undefined}
-          />
-          {txHash && (
-            <div className="rounded-xl border border-slate-200 bg-white/60 p-4 backdrop-blur-sm">
-              <div className="text-xs font-medium text-slate-500">Transaction Hash</div>
-              <div className="mt-1 font-mono text-xs text-slate-900 break-all">{txHash}</div>
-            </div>
-          )}
         </div>
       )}
 
