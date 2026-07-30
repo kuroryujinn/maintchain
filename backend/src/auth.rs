@@ -379,3 +379,33 @@ pub async fn resolve_user_stellar_address(
 
     Ok(row.map(|r| r.0))
 }
+
+/// Resolve a Stellar address (from the X-User-Address header) to the user's UUID.
+/// Returns 400 if the header is missing or the user is not found.
+pub async fn resolve_user_id_from_address(
+    db: &sqlx::PgPool,
+    headers: &axum::http::HeaderMap,
+) -> Result<uuid::Uuid, (StatusCode, String)> {
+    let stellar_address = headers
+        .get("X-User-Address")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            (StatusCode::BAD_REQUEST, "X-User-Address header is required".to_string())
+        })?;
+
+    let row: Option<(uuid::Uuid,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE stellar_address = $1"
+    )
+    .bind(stellar_address)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| {
+        error!("resolve_user_id_from_address: db lookup failed for {stellar_address}: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
+    })?;
+
+    row.map(|(uid,)| uid).ok_or_else(|| {
+        error!("resolve_user_id_from_address: user not found for {stellar_address}");
+        (StatusCode::BAD_REQUEST, format!("User not found for stellar address {stellar_address}"))
+    })
+}

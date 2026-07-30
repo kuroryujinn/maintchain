@@ -22,7 +22,7 @@ mod storage;
 #[allow(dead_code)]
 mod seed;
 use audit::{approve_by_auditor, get_audit_trail};
-use auth::{create_challenge, identity_middleware, resolve_user_stellar_address, verify_challenge};
+use auth::{create_challenge, identity_middleware, resolve_user_id_from_address, resolve_user_stellar_address, verify_challenge};
 use complaint::check_eligibility;
 use soroban_client::{get_onchain_attestation, get_onchain_record};
 mod tx_log;
@@ -490,27 +490,30 @@ async fn get_maintenance(
 
 async fn supervisor_approve(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
     Json(req): Json<SupervisorDecisionRequest>,
 ) -> Result<Json<MaintenanceResponse>, (StatusCode, String)> {
     // Record supervisor approval + set status to PENDING_APPROVAL.
     // The record stays PENDING_APPROVAL until an auditor certifies it.
     // Compliance transition happens in approve_by_auditor after both approvals exist.
-    let resp = supervisor_decision(State(state.clone()), Path(id), Json(req), "APPROVED").await?;
+    let resp = supervisor_decision(State(state.clone()), &headers, Path(id), Json(req), "APPROVED").await?;
 
     Ok(resp)
 }
 
 async fn supervisor_reject(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
     Json(req): Json<SupervisorDecisionRequest>,
 ) -> Result<Json<MaintenanceResponse>, (StatusCode, String)> {
-    supervisor_decision(State(state), Path(id), Json(req), "REJECTED").await
+    supervisor_decision(State(state), &headers, Path(id), Json(req), "REJECTED").await
 }
 
 async fn supervisor_decision(
     State(state): State<AppState>,
+    headers: &HeaderMap,
     Path(id): Path<Uuid>,
     Json(req): Json<SupervisorDecisionRequest>,
     decision: &str,
@@ -539,6 +542,9 @@ async fn supervisor_decision(
         (StatusCode::INTERNAL_SERVER_ERROR, "db error".to_string())
     })?;
 
+    // Resolve the authenticated user's UUID for approver_id tracking
+    let approver_id = resolve_user_id_from_address(&state.db, headers).await?;
+
     // Store approval event.
     sqlx::query(
         r#"
@@ -547,7 +553,7 @@ async fn supervisor_decision(
         "#,
     )
     .bind(id)
-    .bind(Uuid::nil())
+    .bind(approver_id)
     .bind(decision)
     .bind(note)
     .execute(&state.db)

@@ -20,6 +20,7 @@ use sqlx::Row;
 
 use uuid::Uuid;
 
+use crate::auth::resolve_user_id_from_address;
 use crate::{AppState, MaintenanceResponse};
 
 #[derive(Debug, Serialize)]
@@ -133,6 +134,7 @@ pub async fn get_audit_trail(
 
 pub async fn approve_by_auditor(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
     Json(req): Json<ApproveAuditorRequest>,
 ) -> Result<Json<MaintenanceResponse>, (StatusCode, String)> {
@@ -174,7 +176,9 @@ pub async fn approve_by_auditor(
         tracing::info!("audit: on-chain transaction {tx_hash} verified successfully");
     }
 
-    // 3. Record auditor approval in DB
+    // 3. Record auditor approval in DB with authenticated user's UUID
+    let approver_id = resolve_user_id_from_address(&state.db, &headers).await?;
+
     sqlx::query(
         r#"
         insert into approvals (maintenance_id, approver_id, role, decision, approval_timestamp, note, on_chain_tx_id)
@@ -182,7 +186,7 @@ pub async fn approve_by_auditor(
         "#
     )
     .bind(id)
-    .bind(Uuid::nil())
+    .bind(approver_id)
     .bind(note)
     .bind(tx_hash.as_deref())
     .execute(&state.db)
