@@ -297,13 +297,18 @@ async function handleAuthVerify(request: NextRequest): Promise<NextResponse> {
  * POST /api/auth/logout — clears the session cookie.
  */
 async function handleAuthLogout(): Promise<NextResponse> {
+  // Only set Secure flag in production (Vercel always uses HTTPS).
+  // Local dev (HTTP) would silently reject a Secure cookie -> logout would fail silently.
+  const isSecure = process.env.NODE_ENV === 'production';
+  const secureFlag = isSecure ? 'Secure; ' : '';
+
   return NextResponse.json(
     { status: 'ok', message: 'Session cleared' },
     {
       status: 200,
       headers: {
         'Set-Cookie':
-          `${SESSION_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/api; ` +
+          `${SESSION_COOKIE_NAME}=; HttpOnly; ${secureFlag}SameSite=Lax; Path=/api; ` +
           `Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
       },
     },
@@ -324,14 +329,17 @@ async function handleAuthMe(request: NextRequest): Promise<NextResponse> {
 
   const stellarAddress = validateSessionCookie(cookie.value);
   if (!stellarAddress) {
-    // Clear stale cookie
+    // Clear stale cookie — conditionally set Secure to match how the cookie was created
+    const isSecure = process.env.NODE_ENV === 'production';
+    const secureFlag = isSecure ? 'Secure; ' : '';
+
     return NextResponse.json(
       { authenticated: false, stellar_address: null },
       {
         status: 200,
         headers: {
           'Set-Cookie':
-            `${SESSION_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/api; ` +
+            `${SESSION_COOKIE_NAME}=; HttpOnly; ${secureFlag}SameSite=Lax; Path=/api; ` +
             `Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
         },
       },
