@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, FlaskConical } from 'lucide-react';
 
 import FadeInView from '@/components/maintchain/FadeInView';
 
@@ -42,15 +42,31 @@ export default function Hero() {
             <span>soroban ledger</span>
           </div>
 
-          <div className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em]" style={{
-            border: '1px solid rgba(37, 99, 235, 0.2)',
-            background: 'rgba(255, 255, 255, 0.6)',
-            backdropFilter: 'blur(12px)',
-            color: 'var(--primary)',
-            boxShadow: '0 0 20px rgba(37, 99, 235, 0.08)',
-          }}>
-            <span className="glow-dot-blue" />
-            Global reputation network
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em]" style={{
+              border: '1px solid rgba(37, 99, 235, 0.2)',
+              background: 'rgba(255, 255, 255, 0.6)',
+              backdropFilter: 'blur(12px)',
+              color: 'var(--primary)',
+              boxShadow: '0 0 20px rgba(37, 99, 235, 0.08)',
+            }}>
+              <span className="glow-dot-blue" />
+              Global reputation network
+            </div>
+            <Link
+              href="/technical-preview"
+              className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] transition-all duration-200 hover:-translate-y-0.5"
+              style={{
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                background: 'linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(245, 158, 11, 0.1))',
+                backdropFilter: 'blur(12px)',
+                color: '#92400e',
+                boxShadow: '0 0 20px rgba(245, 158, 11, 0.12)',
+              }}
+            >
+              <FlaskConical className="h-3 w-3" />
+              Technical Preview
+            </Link>
           </div>
 
           <h1 className="text-5xl font-bold leading-[1.02] sm:text-6xl lg:text-[56px]" style={{ letterSpacing: '-0.03em' }}>

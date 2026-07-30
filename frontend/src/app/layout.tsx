@@ -6,6 +6,7 @@ import Nav from '@/components/maintchain/Nav';
 import RouteShell from '@/components/maintchain/RouteShell';
 import SentryErrorBoundary from '@/components/maintchain/SentryErrorBoundary';
 import FeedbackButton from '@/components/maintchain/FeedbackButton';
+import TechnicalPreviewBanner from '@/components/maintchain/TechnicalPreviewBanner';
 import { cn } from "@/lib/utils";
 
 const geist = GeistSans;
@@ -15,8 +16,8 @@ const interTight = Inter_Tight({ subsets: ['latin'], variable: '--font-inter-tig
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-jetbrains-mono' });
 
 export const metadata = {
-  title: 'MaintChain | Verifiable reputation for industrial maintenance',
-  description: 'A global trust network for verified repairs, machine history, certificates, and worker reputation.',
+  title: 'MaintChain | Technical Preview — Multi-party approval on Stellar Testnet',
+  description: 'A live technical preview of MaintChain\'s multi-party approval and compliance certificate system on Stellar Testnet. Test contract logic, approval flows, and on-chain verification.',
 };
 
 export default function RootLayout({
@@ -31,6 +32,9 @@ export default function RootLayout({
           <Nav />
           <RouteShell>
             <main className="mx-auto max-w-7xl px-4 pb-20 pt-24 sm:px-6 lg:px-8">
+              <div className="-mx-4 sm:-mx-6 lg:-mx-8">
+                <TechnicalPreviewBanner />
+              </div>
               {children}
             </main>
           </RouteShell>
