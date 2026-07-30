@@ -1081,22 +1081,22 @@ async fn main() -> anyhow::Result<()> {
     // Priority order:
     // 1. DATABASE_URL env var (set in Render dashboard or .env file)
     // 2. POSTGRES_URL env var (alternative name)
-    // 3. Hardcoded Supabase pooled URL (IPv4-compatible fallback)
+    // 3. SUPABASE_Connection_STRING env var
     //
-    // The hardcoded fallback exists because Render dashboard env vars
-    // sometimes revert to stale values. We filter env vars to only accept
-    // URLs that point to Supabase (to catch stale Render values).
-    const SUPABASE_URL: &str = "postgresql://postgres.djewwnatnidmgkhiqgne:Maintchain2006@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres";
-
+    // If none of these are set, the backend panics with a clear error.
+    // NOTE: This used to have a hardcoded Supabase URL as a fallback.
+    // That was removed as a security risk (plaintext credential in source).
     let database_url_raw = std::env::var("DATABASE_URL")
         .ok()
-        .filter(|url| {
-            url.contains("supabase.co") || url.contains("pooler.supabase.com")
-        })
+        .filter(|s| !s.is_empty())
         .or_else(|| std::env::var("POSTGRES_URL").ok())
         .or_else(|| std::env::var("SUPABASE_Connection_STRING").ok())
-        .unwrap_or_else(|| SUPABASE_URL.to_string());
-
+        .unwrap_or_else(|| {
+            panic!(
+                "No database URL configured. Set DATABASE_URL, POSTGRES_URL, \
+                 or SUPABASE_Connection_STRING environment variable."
+            )
+        });
 
     let database_url_raw_prefix = database_url_raw
         .get(0..min(32, database_url_raw.len()))
@@ -1111,12 +1111,6 @@ async fn main() -> anyhow::Result<()> {
     } else {
         format!("{database_url_raw}?sslmode=require")
     };
-
-
-
-
-
-
 
 
     // Supabase often requires IPv4 for outbound connectivity from some environments.
