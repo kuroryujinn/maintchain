@@ -718,8 +718,35 @@ struct UserResponse {
 
 async fn register_user(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<RegisterUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), (StatusCode, String)> {
+    // Verify that the caller owns the Stellar address they're registering.
+    // The proxy sets X-User-Address from the session cookie.
+    // If present, it must match req.stellar_address.
+    if let Some(user_addr) = headers
+        .get("X-User-Address")
+        .and_then(|v| v.to_str().ok())
+    {
+        if user_addr != req.stellar_address {
+            error!(
+                "register_user: X-User-Address '{}' doesn't match stellar_address '{}'",
+                user_addr, req.stellar_address
+            );
+            return Err((
+                StatusCode::FORBIDDEN,
+                format!(
+                    "Registered stellar_address '{}' does not match the authenticated caller '{}'",
+                    req.stellar_address, user_addr
+                ),
+            ));
+        }
+    } else {
+        warn!(
+            "register_user: no X-User-Address header — allowing registration in dev mode"
+        );
+    }
+
     let id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO users (id, stellar_address, name, role, organization) VALUES ($1, $2, $3, $4, $5)"#,
