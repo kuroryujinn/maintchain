@@ -18,6 +18,7 @@ mod audit;
 mod auth;
 mod complaint;
 mod soroban_client;
+mod soroban_rpc;
 mod storage;
 #[allow(dead_code)]
 mod seed;
