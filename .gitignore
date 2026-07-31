@@ -29,6 +29,7 @@ target/
 # Build files
 dist/
 build/
+*.tsbuildinfo
 
 # Environment
 *.env
