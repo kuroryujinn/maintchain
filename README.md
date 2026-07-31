@@ -144,7 +144,7 @@ Fault Detected -> Worker Accepts -> Evidence Uploaded
 
 **Stage 4 — Verification:** Supervisor reviews evidence against work order. On-chain hash proves reviewer saw exactly what was submitted.
 
-**Stage 5 — Multi-Party Approval:** Supervisor approves (or rejects) on-chain via `MultiPartyApproval.approve_by_supervisor`. Optional auditor signs via `approve_by_auditor`. `verify_compliance` returns `true` only when **all** required parties have approved.
+**Stage 5 — Multi-Party Approval:** Supervisor approves (or rejects) on-chain via `MultiPartyApproval.approve_by_supervisor`. Optional auditor signs via `approve_by_auditor`. `verify` returns `true` only when **all** required parties have approved.
 
 **Stage 6 — Certificate Issuance:** `ComplianceAttestation` issues final certificate with issuer address, cert hash, and timestamp. Permanently on-chain, visible to any party.
 
@@ -168,8 +168,8 @@ Five independent Soroban crates, each compiled to WASM (`wasm32v1-none`):
 | Contract | Purpose | Key Functions |
 |----------|---------|---------------|
 | **EquipmentRegistry** | Equipment registration + versioned snapshots | `register_equipment`, `update_owner`, `get_equipment`, `get_equipment_version` |
-| **MaintenanceRecords** | Maintenance order state machine (Open -> Submitted -> PendingApproval -> Compliant/Rejected) | `create_record`, `submit_evidence`, `update_status`, `complete_record`, `get_record` |
-| **MultiPartyApproval** | Approval bitmap (tech x supervisor x auditor). **Enforcement point** for compliance | `approve_by_technician`, `approve_by_supervisor`, `approve_by_auditor`, `reject_by_supervisor`, `verify_compliance`, `set_auditor_required` |
+| **MaintenanceRecords** | Maintenance order state machine (Open -> Submitted -> PendingApproval -> Compliant/Rejected) | `create_record`, `submit_evidence`, `update_status`, `complete`, `set_authorized_completer`, `get_record` |
+| **MultiPartyApproval** | Approval bitmap (tech x supervisor x auditor). **Enforcement point** for compliance | `approve_by_technician`, `approve_by_supervisor`, `approve_by_auditor`, `reject_by_supervisor`, `verify`, `set_auditor_required` |
 | **ComplianceAttestation** | Final certificate issuance with cross-contract compliance check | `issue_certificate`, `get_attestation` |
 | **IdentityRegistry** | Identity verification per wallet (role, org, profile hash, version). **Entry point for Get Verified flow** | `verify_identity`, `is_verified`, `get_identity` |
 
@@ -197,7 +197,7 @@ Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, and Id
 |       +-- main.rs               # Router, handlers, CORS, DB pool
 |       +-- audit.rs              # Audit trail, auditor approval
 |       +-- complaint.rs          # Compliance transition logic
-|       +-- soroban_client.rs     # Soroban RPC wrapper (spawns Node.js helper)
+|       +-- soroban_client.rs     # Native Rust Soroban RPC client (verify-only)
 |       +-- storage.rs            # File hashing + IPFS upload
 |       +-- seed.rs               # Database seeder
 |       +-- seed_main.rs          # Binary entry point for seeding
@@ -458,6 +458,7 @@ curl -X POST http://localhost:8081/hash/evidence \
 | `/register` | User registration with wallet connect |
 | `/users` | Registered user directory |
 | `/feedback` | Feedback collection with star ratings |
+| `/technical-preview` | Phase 1 "What to Test" guide for the six compliance stages |
 
 ### Deploying Contracts
 
@@ -561,8 +562,8 @@ All landing page components pass visual inspection with zero console errors (ver
 
 - **EquipmentRegistry**: 3 unit tests (registration, version retrieval, owner transfer via snapshots)
 - **MaintenanceRecords**: CRUD operations for the state machine
-- **MultiPartyApproval**: Approval bitmap with configurable auditor requirement (12+ scenarios)
-- **ComplianceAttestation**: Certificate issuance with cross-contract invocation scaffolded
+- **MultiPartyApproval**: Approval bitmap with configurable auditor requirement (18 scenarios)
+- **ComplianceAttestation**: Certificate issuance with fully wired cross-contract calls (4 tests: full flow, not-eligible, ineligible status, not-found)
 - **IdentityRegistry**: 6 unit tests (verification, pre-verification state, re-verification version bumps, field preservation, wallet isolation, state transitions)
 
 ### Monitoring
@@ -604,13 +605,13 @@ MaintChain integrates **Sentry** for error tracking:
 
 ## Limitations
 
-1. **Cross-contract invocation is stubbed.** `ComplianceAttestation.issue_certificate` performs cross-contract calls but Soroban SDK v21 symbol-length constraints require careful matching. Full wiring is in progress.
+1. **Cross-contract invocation is wired.** `ComplianceAttestation.issue_certificate` invokes `MultiPartyApproval.verify` and `MaintenanceRecords.complete` via `env.invoke_contract` with short symbols (`symbol_short!`), avoiding the WASM export symbol-length limit. Covered by 4 unit tests including the full certification flow.
 
-2. **Soroban RPC dependency.** The frontend's `invokeContract` helper polls `getTransaction` up to 15 times (15-second timeout). RPC latency or unavailability causes contract call failures. No fallback queuing implemented.
+2. **Soroban RPC dependency.** The frontend's `invokeContract` helper polls `getTransaction` up to 15 times (15-second timeout). RPC latency or unavailability causes contract call failures. The UI now surfaces every outcome — `pending` shows the poll attempt count ("Confirming on-chain — attempt 4/15"), `timeout` shows the transaction hash with a Stellar Expert link and a manual "Check again" re-poll, and `failed` shows the actual reason. Automated retry-with-backoff queuing is deliberately out of scope for Phase 1.
 
 3. **Off-chain evidence storage.** The backend stores evidence hashes but not the evidence files themselves. A production deployment would need IPFS, S3, or equivalent for media storage.
 
-4. **API authentication is partially production-ready.** A two-layer auth system (MAINTCHAIN_API_KEY + session cookie) is fully implemented in the Next.js proxy and backend middleware. The backend still uses `CorsLayer::permissive()` in development for local testing. In production, CORS should be restricted to the frontend domain, and the proxy's `AUTH_SECRET` must be set to a cryptographically random value.
+4. **API authentication is partially production-ready.** A two-layer auth system (MAINTCHAIN_API_KEY + session cookie) is fully implemented in the Next.js proxy and backend middleware. CORS is restricted to an explicit `ALLOWED_ORIGINS` allow-list (comma-separated env var; `http://localhost:3000` dev fallback) with GET/POST methods only. The proxy's `AUTH_SECRET` must be set to a cryptographically random value in production.
 
 5. **Database URL handling.** The backend appends `?sslmode=require` to Postgres connection strings that use a plain `postgres://` scheme (no SSL params present). This works for Supabase and standard Postgres but may conflict with connection poolers.
 
@@ -618,7 +619,7 @@ MaintChain integrates **Sentry** for error tracking:
 
 7. **Demo data is hardcoded.** Worker profiles, machine metadata, certificates, and leaderboard entries are defined in `frontend/src/data/maintchain.ts`. A production system would hydrate these from the API.
 
-8. **Soroban SDK version.** Contracts target SDK v21. SDK v22+ changed the cross-contract invocation API.
+8. **Soroban SDK version.** Contracts target SDK 26.1.0 (previously v21). The symbol-length note that used to apply to v21 export names no longer blocks cross-contract calls, which use short `symbol_short!` names.
 
 ---
 

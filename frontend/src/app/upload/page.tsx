@@ -1,11 +1,12 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import FadeInView from '@/components/maintchain/FadeInView';
 import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/maintchain/ui';
 import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
 import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
-import { toBytesN32 } from '@/lib/soroban';
+import { toBytesN32, pollTransactionStatus } from '@/lib/soroban';
+import { handleContractStatus } from '@/lib/tx-status-handler';
 import { useTransactionState, TxState, FAILURE_STATES } from '@/hooks/useTransactionState';
 import { TransactionProgress, TransactionSteps } from '@/components/maintchain/TransactionProgress';
 import { addTxLogEvent } from '@/lib/transaction-logger';
@@ -19,6 +20,10 @@ export default function EvidenceUpload() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Remembers the evidence hash + record so "Check again" can resume the
+  // backend DB mirror if the on-chain tx actually succeeded.
+  const timeoutContextRef = useRef<{ maintenanceId: string; evidenceHash: string } | null>(null);
 
   const txStateMachine = useTransactionState({
     onStateChange: (newState) => {
@@ -34,11 +39,74 @@ export default function EvidenceUpload() {
     },
   });
 
+  /**
+   * Re-polls an already-submitted transaction after a timeout (Phase 1
+   * "Check again" recovery).
+   */
+  const handleCheckAgain = async (hash: string) => {
+    txStateMachine.transition(TxState.PENDING, {
+      pollAttempt: String(txStateMachine.maxPollAttempts ?? 15),
+      maxPollAttempts: String(txStateMachine.maxPollAttempts ?? 15),
+      recheck: '1',
+    });
+    try {
+      const status = await pollTransactionStatus(hash);
+      if (status === 'SUCCESS') {
+        txStateMachine.transition(TxState.CONFIRMED, { hash });
+
+        // Resume the backend DB mirror that was interrupted by the timeout.
+        const ctx = timeoutContextRef.current;
+        timeoutContextRef.current = null;
+        if (ctx) {
+          txStateMachine.transition(TxState.DATABASE_SYNC);
+          try {
+            const result = await api.submitEvidence(ctx.maintenanceId, {
+              evidence_hash: ctx.evidenceHash,
+            });
+            txStateMachine.transition(TxState.COMPLETE, { hash });
+            setUploadResult(
+              `Evidence submitted! Status: ${result.status} | On-chain tx: ${hash.slice(0, 12)}...`
+            );
+          } catch (e) {
+            txStateMachine.setError(
+              TxState.DATABASE_SYNC_FAILED,
+              `On-chain confirmed but the database mirror failed: ${String(e)}`,
+              { hash },
+            );
+          }
+        } else {
+          txStateMachine.transition(TxState.COMPLETE, { hash });
+          setUploadResult(`Evidence hash confirmed on-chain (re-checked) | On-chain tx: ${hash.slice(0, 12)}...`);
+        }
+      } else if (status === 'FAILED') {
+        txStateMachine.setError(
+          TxState.RPC_ERROR,
+          `Transaction failed on-chain. Check the explorer for details (hash: ${hash.slice(0, 12)}...).`,
+          { hash },
+        );
+        setUploadError('On-chain transaction failed');
+      } else {
+        txStateMachine.setError(
+          TxState.TIMEOUT,
+          `Still pending after re-check. Testnet can be slow — check the explorer link above. Hash: ${hash.slice(0, 12)}...`,
+          { hash },
+        );
+      }
+    } catch {
+      txStateMachine.setError(
+        TxState.TIMEOUT,
+        `Couldn't reach Testnet to check status — try again shortly.`,
+        { hash },
+      );
+    }
+  };
+
   const handleUpload = async () => {
     if (!file || !maintenanceId) return;
     setUploading(true);
     setUploadResult(null);
     setUploadError(null);
+    timeoutContextRef.current = null;
 
     try {
       txStateMachine.reset();
@@ -65,12 +133,11 @@ export default function EvidenceUpload() {
           [idBytes32, hash.evidence_hash, address],
           {
             onStatusChange: (status) => {
-              if (status.state === 'simulating') txStateMachine.transition(TxState.SIMULATING);
-              if (status.state === 'awaiting_signature') txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
-              if (status.state === 'submitting') txStateMachine.transition(TxState.SUBMITTING);
-              if (status.state === 'pending') txStateMachine.transition(TxState.PENDING);
-              if (status.state === 'timeout') txStateMachine.setError(TxState.TIMEOUT, `Transaction submitted but not yet confirmed. Hash: ${status.hash}`);
-              if (status.state === 'failed') txStateMachine.setError(TxState.RPC_ERROR, status.reason);
+              handleContractStatus(status, txStateMachine, {
+                onTimeout: () => {
+                  timeoutContextRef.current = { maintenanceId, evidenceHash: hash.evidence_hash };
+                },
+              });
             },
           }
         );
@@ -86,14 +153,17 @@ export default function EvidenceUpload() {
         evidence_hash: hash.evidence_hash,
       });
 
-      txStateMachine.transition(TxState.COMPLETE, { hash: txStateMachine.transactionHash || '' });
+      txStateMachine.transition(TxState.COMPLETE, { hash: onChainTx || '' });
 
       const txInfo = onChainTx ? ` | On-chain tx: ${onChainTx.slice(0, 12)}...` : '';
       setUploadResult(`Evidence submitted! Status: ${result.status}${txInfo}`);
     } catch (error) {
       const message = error instanceof ApiError ? `${error.code}: ${error.message}` : 'Upload failed';
-      txStateMachine.setError(TxState.RPC_ERROR, message);
-      setUploadError(message);
+      const isTimeout = (error as { isTxTimeout?: boolean })?.isTxTimeout === true;
+      if (!isTimeout) {
+        txStateMachine.setError(TxState.RPC_ERROR, message);
+        setUploadError(message);
+      }
     } finally {
       setUploading(false);
     }
@@ -200,8 +270,8 @@ export default function EvidenceUpload() {
               <TransactionProgress
                 stateMachine={txStateMachine}
                 explorerUrl="https://stellar.expert/explorer/testnet"
-                onRetry={txStateMachine.retry}
                 onDismiss={txStateMachine.reset}
+                onCheckAgain={handleCheckAgain}
               />
             </div>
           )}

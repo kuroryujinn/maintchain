@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import FadeInView from '@/components/maintchain/FadeInView';
 import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/maintchain/ui';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,8 @@ import {
   Building2,
   User,
 } from 'lucide-react';
-import { toBytesN32 } from '@/lib/soroban';
+import { toBytesN32, pollTransactionStatus } from '@/lib/soroban';
+import { handleContractStatus } from '@/lib/tx-status-handler';
 import { useTransactionState, TxState, FAILURE_STATES } from '@/hooks/useTransactionState';
 import { TransactionProgress } from '@/components/maintchain/TransactionProgress';
 import { addTxLogEvent } from '@/lib/transaction-logger';
@@ -77,6 +78,10 @@ export default function AuditTimeline() {
   const [auditData, setAuditData] = useState<AuditResponse | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [certifying, setCertifying] = useState(false);
+
+  // Remembers the certification context so "Check again" can resume the
+  // backend DB mirror if the on-chain tx actually succeeded.
+  const timeoutContextRef = useRef<{ maintenanceId: string; decisionNote: string } | null>(null);
 
   const txStateMachine = useTransactionState({
     onStateChange: (newState) => {
@@ -151,12 +156,77 @@ export default function AuditTimeline() {
     }
   };
 
+  /**
+   * Re-polls an already-submitted transaction after a timeout (Phase 1
+   * "Check again" recovery).
+   */
+  const handleCheckAgain = async (hash: string) => {
+    txStateMachine.transition(TxState.PENDING, {
+      pollAttempt: String(txStateMachine.maxPollAttempts ?? 15),
+      maxPollAttempts: String(txStateMachine.maxPollAttempts ?? 15),
+      recheck: '1',
+    });
+    try {
+      const status = await pollTransactionStatus(hash);
+      if (status === 'SUCCESS') {
+        txStateMachine.transition(TxState.CONFIRMED, { hash });
+
+        // Resume the backend DB mirror that was interrupted by the timeout.
+        const ctx = timeoutContextRef.current;
+        timeoutContextRef.current = null;
+        if (ctx) {
+          txStateMachine.transition(TxState.DATABASE_SYNC);
+          try {
+            const result = await api.auditorApprove(ctx.maintenanceId, {
+              decision_note: ctx.decisionNote,
+              transaction_hash: hash,
+            });
+            txStateMachine.transition(TxState.COMPLETE, { hash });
+            setTxHash(`Certificate issued → Status: ${result.status} | On-chain tx: ${hash.slice(0, 12)}...`);
+            resetForm();
+            refreshAuditTrail();
+          } catch (e) {
+            txStateMachine.setError(
+              TxState.DATABASE_SYNC_FAILED,
+              `On-chain confirmed but the database mirror failed: ${String(e)}`,
+              { hash },
+            );
+          }
+        } else {
+          txStateMachine.transition(TxState.COMPLETE, { hash });
+          setTxHash(`Certificate confirmed on-chain (re-checked) | On-chain tx: ${hash.slice(0, 12)}...`);
+          refreshAuditTrail();
+        }
+      } else if (status === 'FAILED') {
+        txStateMachine.setError(
+          TxState.RPC_ERROR,
+          `Transaction failed on-chain. Check the explorer for details (hash: ${hash.slice(0, 12)}...).`,
+          { hash },
+        );
+        setError('On-chain certification failed');
+      } else {
+        txStateMachine.setError(
+          TxState.TIMEOUT,
+          `Still pending after re-check. Testnet can be slow — check the explorer link above. Hash: ${hash.slice(0, 12)}...`,
+          { hash },
+        );
+      }
+    } catch {
+      txStateMachine.setError(
+        TxState.TIMEOUT,
+        `Couldn't reach Testnet to check status — try again shortly.`,
+        { hash },
+      );
+    }
+  };
+
   const handleCertify = async () => {
     if (!validateForm()) return;
     setCertifying(true);
     setTxHash(null);
     setError(null);
     setDialogOpen(false);
+    timeoutContextRef.current = null;
 
     const maintenanceId = 'REC-DE-4471';
     txStateMachine.reset();
@@ -206,12 +276,11 @@ export default function AuditTimeline() {
           [MULTI_PARTY_APPROVAL_ID, MAINTENANCE_RECORDS_ID, idBytes32, certHash],
           {
             onStatusChange: (status) => {
-              if (status.state === 'simulating') txStateMachine.transition(TxState.SIMULATING);
-              if (status.state === 'awaiting_signature') txStateMachine.transition(TxState.WAITING_FOR_SIGNATURE);
-              if (status.state === 'submitting') txStateMachine.transition(TxState.SUBMITTING);
-              if (status.state === 'pending') txStateMachine.transition(TxState.PENDING);
-              if (status.state === 'timeout') txStateMachine.setError(TxState.TIMEOUT, `Transaction submitted but not yet confirmed. Hash: ${status.hash}`);
-              if (status.state === 'failed') txStateMachine.setError(TxState.RPC_ERROR, status.reason);
+              handleContractStatus(status, txStateMachine, {
+                onTimeout: () => {
+                  timeoutContextRef.current = { maintenanceId, decisionNote };
+                },
+              });
             },
           }
         );
@@ -235,8 +304,11 @@ export default function AuditTimeline() {
       }
     } catch (e: unknown) {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
-      txStateMachine.setError(TxState.RPC_ERROR, message);
-      setError(message);
+      const isTimeout = (e as { isTxTimeout?: boolean })?.isTxTimeout === true;
+      if (!isTimeout) {
+        txStateMachine.setError(TxState.RPC_ERROR, message);
+        setError(message);
+      }
     } finally {
       setCertifying(false);
     }
@@ -298,8 +370,8 @@ export default function AuditTimeline() {
                     <TransactionProgress
                       stateMachine={txStateMachine}
                       explorerUrl="https://stellar.expert/explorer/testnet"
-                      onRetry={txStateMachine.retry}
                       onDismiss={txStateMachine.reset}
+                      onCheckAgain={handleCheckAgain}
                     />
                   </div>
                 )}

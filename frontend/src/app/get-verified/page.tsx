@@ -50,12 +50,14 @@ async function sha256Hex(input: string): Promise<string> {
 const STELLAR_EXPLORER_TX = 'https://stellar.expert/explorer/testnet/tx';
 
 // ─── Error display component ───
-function ErrorPanel({ title, message, actionLabel, actionHref, onRetry }: {
+function ErrorPanel({ title, message, actionLabel, actionHref, onRetry, explorerTxHash }: {
   title: string;
   message: string;
   actionLabel?: string;
   actionHref?: string;
   onRetry?: () => void;
+  /** When set, shows a "View on Stellar Expert" link for a submitted-but-unconfirmed tx */
+  explorerTxHash?: string | null;
 }) {
   return (
     <div className="rounded-2xl border border-red-200 bg-red-50/80 p-6 backdrop-blur-sm">
@@ -80,6 +82,16 @@ function ErrorPanel({ title, message, actionLabel, actionHref, onRetry }: {
               >
                 {actionLabel} <ExternalLink className="h-3 w-3" />
               </Link>
+            )}
+            {explorerTxHash && (
+              <a
+                href={`${STELLAR_EXPLORER_TX}/${explorerTxHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-full border border-blue-300 bg-white px-4 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+              >
+                View on Stellar Expert <ExternalLink className="h-3 w-3" />
+              </a>
             )}
           </div>
         </div>
@@ -312,9 +324,10 @@ export default function GetVerifiedPage() {
                 // Handled by existing code after callContract returns
                 break;
               case 'timeout':
+                setTxHash(status.hash);
                 setErrorTitle('Transaction Timeout');
                 setErrorMessage(
-                  `Transaction submitted (hash: ${status.hash.slice(0, 8)}...) but confirmation timed out after 15 seconds. Check the explorer for status.`
+                  `Transaction submitted (hash: ${status.hash.slice(0, 8)}...) but confirmation timed out after 15 seconds. This can happen under Testnet load — check the explorer below to see the latest status.`
                 );
                 setStep('error');
                 break;
@@ -457,6 +470,7 @@ export default function GetVerifiedPage() {
           onRetry={handleConnectAndCheck}
           actionLabel="View Testnet Faucet"
           actionHref="https://lab.stellar.org/"
+          explorerTxHash={txHash}
         />
       )}
 

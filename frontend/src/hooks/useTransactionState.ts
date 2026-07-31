@@ -1,5 +1,5 @@
 // frontend/src/hooks/useTransactionState.ts
-// Full transaction lifecycle state machine with retry strategy.
+// Full transaction lifecycle state machine.
 
 import { useState, useCallback, useRef } from 'react';
 
@@ -28,19 +28,6 @@ export enum TxState {
   DATABASE_SYNC_FAILED = 'DATABASE_SYNC_FAILED',
 }
 
-// ── Retry Policies ──
-
-export enum RetryCategory {
-  RETRYABLE  = 'RETRYABLE',   // RPC errors, timeouts, network issues
-  NON_RETRYABLE = 'NON_RETRYABLE', // Bad signature, insufficient XLM, contract revert
-}
-
-const RETRYABLE_STATES = new Set([
-  TxState.RPC_ERROR,
-  TxState.TIMEOUT,
-  TxState.DATABASE_SYNC_FAILED,
-]);
-
 export const FAILURE_STATES = new Set([
   TxState.SIMULATION_FAILED,
   TxState.SIGNATURE_REJECTED,
@@ -51,24 +38,13 @@ export const FAILURE_STATES = new Set([
   TxState.DATABASE_SYNC_FAILED,
 ]);
 
-function getRetryCategory(state: TxState): RetryCategory {
-  return RETRYABLE_STATES.has(state) ? RetryCategory.RETRYABLE : RetryCategory.NON_RETRYABLE;
-}
-
-const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 1000;
-
 interface RetryState {
   count: number;
   lastError: string;
-  nextRetryAt: number | null;
 }
 
 interface TxStateMachineOptions {
   onStateChange?: (state: TxState, previous: TxState) => void;
-  onRetry?: (attempt: number, maxRetries: number) => void;
-  maxRetries?: number;
-  baseDelayMs?: number;
 }
 
 export interface TxStateMachine {
@@ -77,32 +53,33 @@ export interface TxStateMachine {
   isProcessing: boolean;
   isCompleted: boolean;
   isFailed: boolean;
-  isRetryable: boolean;
   retryCount: number;
-  maxRetries: number;
   lastError: string | null;
   transactionHash: string | null;
+  pollAttempt: number | null;
+  maxPollAttempts: number | null;
+  /** True while the manual "Check again" re-poll is running */
+  isRechecking: boolean;
 
   // Actions
   transition: (newState: TxState, metadata?: Record<string, string>) => void;
-  setError: (state: TxState, error: string) => void;
-  retry: () => void;
+  setError: (state: TxState, error: string, metadata?: Record<string, string>) => void;
   reset: () => void;
-  setTransactionHash: (hash: string) => void;
 }
 
 export function useTransactionState(
   options: TxStateMachineOptions = {}
 ): TxStateMachine {
-  const { maxRetries = MAX_RETRIES, baseDelayMs = BASE_DELAY_MS } = options;
   const [state, setState] = useState<TxState>(TxState.IDLE);
   const [previousState, setPreviousState] = useState<TxState>(TxState.IDLE);
   const [retryState, setRetryState] = useState<RetryState>({
     count: 0,
     lastError: '',
-    nextRetryAt: null,
   });
   const [transactionHash, setTransactionHash] = useState<string | null>(null);
+  const [pollAttempt, setPollAttempt] = useState<number | null>(null);
+  const [maxPollAttempts, setMaxPollAttempts] = useState<number | null>(null);
+  const [isRechecking, setIsRechecking] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -112,45 +89,41 @@ export function useTransactionState(
     setPreviousState(prev);
     setState(newState);
 
-    if (newState === TxState.COMPLETE) {
+    // Persist the tx hash for CONFIRMED/COMPLETE so the explorer link can render.
+    // TIMEOUT also carries a hash (submitted but unconfirmed) so testers can
+    // look it up on Stellar Expert and use "Check again". DATABASE_SYNC_FAILED
+    // carries the same hash (on-chain succeeded, mirror failed) so the link
+    // renders regardless of transition ordering.
+    if (
+      newState === TxState.COMPLETE ||
+      newState === TxState.CONFIRMED ||
+      newState === TxState.TIMEOUT ||
+      newState === TxState.DATABASE_SYNC_FAILED
+    ) {
       setTransactionHash(metadata?.hash || transactionHash);
     }
 
+    // Surface the RPC poll progress ("Confirming on-chain — attempt 4/15").
+    if (metadata?.pollAttempt !== undefined) {
+      setPollAttempt(Number(metadata.pollAttempt));
+    }
+    if (metadata?.maxPollAttempts !== undefined) {
+      setMaxPollAttempts(Number(metadata.maxPollAttempts));
+    }
+    // Clear the re-check flag whenever a fresh poll transition arrives without
+    // the recheck marker, so stale state never shows the wrong label.
+    setIsRechecking(metadata?.recheck === '1');
+
     // If this is a failure state, update retry tracking
     if (FAILURE_STATES.has(newState)) {
-      setRetryState(prevRetry => {
-        const nextCount = prevRetry.count + 1;
-        return {
-          count: nextCount,
-          lastError: metadata?.error || 'Unknown error',
-          nextRetryAt: RETRYABLE_STATES.has(newState) && nextCount < maxRetries
-            ? Date.now() + Math.min(baseDelayMs * Math.pow(2, prevRetry.count), 15000)
-            : null,
-        };
-      });
+      setRetryState(prevRetry => ({
+        count: prevRetry.count + 1,
+        lastError: metadata?.error || 'Unknown error',
+      }));
     }
 
     options.onStateChange?.(newState, prev);
-  }, [options, maxRetries, baseDelayMs, transactionHash]);
-
-  const retry = useCallback(() => {
-    // Only retry from retryable states
-    if (!RETRYABLE_STATES.has(stateRef.current)) return;
-    if (retryState.count >= maxRetries) return;
-
-    // Clear the timer
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-
-    // Go back to the state before failure (usually SUBMITTING or PENDING)
-    if (stateRef.current === TxState.RPC_ERROR || stateRef.current === TxState.TIMEOUT) {
-      setState(TxState.SUBMITTING);
-    } else if (stateRef.current === TxState.DATABASE_SYNC_FAILED) {
-      setState(TxState.DATABASE_SYNC);
-    }
-  }, [retryState.count, maxRetries]);
+  }, [options, transactionHash]);
 
   const reset = useCallback(() => {
     if (timerRef.current) {
@@ -159,8 +132,11 @@ export function useTransactionState(
     }
     setState(TxState.IDLE);
     setPreviousState(TxState.IDLE);
-    setRetryState({ count: 0, lastError: '', nextRetryAt: null });
+    setRetryState({ count: 0, lastError: '' });
     setTransactionHash(null);
+    setPollAttempt(null);
+    setMaxPollAttempts(null);
+    setIsRechecking(false);
   }, []);
 
   return {
@@ -169,16 +145,16 @@ export function useTransactionState(
     isProcessing: state !== TxState.IDLE && state !== TxState.COMPLETE && !FAILURE_STATES.has(state),
     isCompleted: state === TxState.COMPLETE,
     isFailed: FAILURE_STATES.has(state),
-    isRetryable: RETRYABLE_STATES.has(state) && retryState.count < maxRetries,
     retryCount: retryState.count,
-    maxRetries,
     lastError: retryState.lastError || null,
     transactionHash,
+    pollAttempt,
+    maxPollAttempts,
+    isRechecking,
     transition,
-    setError: (newState: TxState, error: string) => transition(newState, { error }),
-    retry,
+    setError: (newState: TxState, error: string, metadata?: Record<string, string>) =>
+      transition(newState, { error, ...metadata }),
     reset,
-    setTransactionHash: (hash: string) => setTransactionHash(hash),
   };
 }
 

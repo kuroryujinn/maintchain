@@ -8,8 +8,9 @@ import { Loader2, CheckCircle2, AlertCircle, Clock, RefreshCw, ExternalLink } fr
 interface TransactionProgressProps {
   stateMachine: ReturnType<typeof useTransactionState>;
   explorerUrl?: string;
-  onRetry?: () => void;
   onDismiss?: () => void;
+  /** Re-polls an already-submitted tx once (timeout recovery) */
+  onCheckAgain?: (txHash: string) => void | Promise<void>;
 }
 
 const STATE_ICONS: Record<string, React.ReactNode> = {
@@ -41,16 +42,17 @@ const STATE_COLORS: Record<string, string> = {
 export function TransactionProgress({
   stateMachine,
   explorerUrl,
-  onRetry,
   onDismiss,
+  onCheckAgain,
 }: TransactionProgressProps) {
-  const { state, isCompleted, isFailed, isRetryable, retryCount, maxRetries, transactionHash } = stateMachine;
+  const { state, isCompleted, isFailed, retryCount, lastError, transactionHash, pollAttempt, maxPollAttempts, isRechecking } = stateMachine;
 
   if (state === TxState.IDLE) return null;
 
   const msg = TX_STATE_MESSAGES[state];
   const icon = STATE_ICONS[state] || <Loader2 className="h-5 w-5 animate-spin text-blue-500" />;
   const colorClass = STATE_COLORS[msg.tone];
+  const isTimeout = state === TxState.TIMEOUT;
 
   return (
     <div className={`rounded-xl border p-4 text-sm transition-all motion-safe:animate-[fadeSlideUp_0.3s_ease-out] ${colorClass}`}>
@@ -60,10 +62,45 @@ export function TransactionProgress({
           <p className="font-semibold">{msg.title}</p>
           <p className="mt-0.5 text-xs opacity-80">{msg.description}</p>
 
-          {/* Retry counter */}
+          {/* Failure details — the re-check branches pass distinct copy via
+              lastError (e.g. "Still pending after re-check…" vs "Couldn't reach
+              Testnet to check status…"), so a stuck tester isn't told the same
+              thing as one who's just waiting. The FAILED branch stays the only
+              red state. */}
+          {isFailed && lastError && (
+            <p className="mt-1 text-xs font-medium opacity-90">{lastError}</p>
+          )}
+
+          {/* RPC poll progress — "Confirming on-chain — attempt 4/15" */}
+          {state === TxState.PENDING && isRechecking && (
+            <p className="mt-1 text-xs font-medium opacity-80">
+              Re-checking on-chain status…
+            </p>
+          )}
+          {state === TxState.PENDING && !isRechecking && pollAttempt != null && maxPollAttempts != null && (
+            <p className="mt-1 text-xs font-medium opacity-80">
+              Confirming on-chain — attempt {pollAttempt}/{maxPollAttempts}
+            </p>
+          )}
+
+          {/* Failed-check counter — counts failed confirmation checks (the original
+              poll plus any manual "Check again" re-polls). No denominator: there is
+              no automatic retry loop anymore. */}
           {retryCount > 0 && (
             <p className="mt-1 text-xs opacity-70">
-              Attempt {retryCount + 1} of {maxRetries + 1}
+              Check attempt {retryCount}
+            </p>
+          )}
+
+          {/* Timeout guidance — only on the initial timeout. After a "Check again"
+              re-poll, lastError carries the state-specific copy ("Still pending after
+              re-check…" / "Couldn't reach Testnet…"), so the static press-Check-again
+              hint would be redundant. retryCount is 1 on the first failure (every
+              action handler resets it) and increments on re-check timeouts. */}
+          {isTimeout && retryCount <= 1 && (
+            <p className="mt-1 text-xs opacity-80">
+              Transaction submitted but not yet confirmed. This can happen under Testnet load — check the
+              explorer below, then press <strong>Check again</strong> to re-poll once.
             </p>
           )}
 
@@ -79,7 +116,7 @@ export function TransactionProgress({
                   className="inline-flex items-center gap-1 text-xs underline hover:opacity-80"
                 >
                   <ExternalLink className="h-3 w-3" />
-                  View
+                  View on Stellar Expert
                 </a>
               )}
             </div>
@@ -87,19 +124,27 @@ export function TransactionProgress({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {/* Retry button */}
-          {isFailed && isRetryable && onRetry && (
+          {/* Check again — re-polls the submitted tx once (timeout recovery) */}
+          {isTimeout && onCheckAgain && transactionHash && (
             <button
-              onClick={onRetry}
+              onClick={() => onCheckAgain(transactionHash)}
               className="rounded-full bg-white/80 px-3 py-1 text-xs font-medium hover:bg-white transition-colors"
             >
               <RefreshCw className="h-3 w-3 mr-1 inline" />
-              Retry
+              Check again
             </button>
           )}
 
-          {/* Dismiss button on terminal states */}
-          {(isCompleted || (isFailed && !isRetryable)) && onDismiss && (
+          {/* NOTE: no general Retry button — the state machine no longer exposes
+              retry() since it only re-transitioned without re-running the underlying
+              operation (a permanent-spinner trap). Recovery is: "Check again"
+              (re-polls a submitted tx) on timeout, and re-triggering the action
+              button for other failures. Dismiss clears the card. */}
+
+          {/* Dismiss button on terminal states (incl. timeout, which is
+              technically retryable — the tester may want to move on if the
+              RPC is down) */}
+          {(isCompleted || isFailed) && onDismiss && (
             <button
               onClick={onDismiss}
               className="rounded-full bg-white/80 px-3 py-1 text-xs font-medium hover:bg-white transition-colors"

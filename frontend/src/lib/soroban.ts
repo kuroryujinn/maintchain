@@ -208,7 +208,9 @@ export async function invokeContract(
     onStatusChange?.({ state: 'timeout', hash: txHash });
     let errorMsg = `${errorCtx}: Soroban transaction TIMEOUT after ${MAX_POLL_ATTEMPTS}s`;
     errorMsg += ' (no resultXdr — polling timed out)';
-    throw new Error(errorMsg);
+    const timeoutError = new Error(errorMsg) as Error & { isTxTimeout?: boolean };
+    timeoutError.isTxTimeout = true;
+    throw timeoutError;
   }
 
   // Surface full Soroban error details for diagnostics
@@ -230,6 +232,22 @@ export async function invokeContract(
 
   onStatusChange?.({ state: 'success', hash: txHash });
   return { transactionHash: txHash, status: 'SUCCESS' };
+}
+
+/**
+ * Poll a single transaction's status from Soroban RPC.
+ * Used by the "Check again" button after a timeout — re-polls the existing
+ * hash once instead of restarting the full simulate/sign/submit loop.
+ */
+export async function pollTransactionStatus(
+  txHash: string,
+): Promise<'SUCCESS' | 'FAILED' | 'PENDING'> {
+  const res = await fetch(
+    `${SOROBAN_RPC_URL}/getTransaction/${encodeURIComponent(txHash)}`,
+  );
+  if (!res.ok) return 'PENDING';
+  const data = await res.json();
+  return (data?.status ?? 'PENDING') as 'SUCCESS' | 'FAILED' | 'PENDING';
 }
 
 /**

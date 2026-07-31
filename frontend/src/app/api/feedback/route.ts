@@ -8,6 +8,10 @@ interface FeedbackBody {
   email?: string;
   wallet?: string | null;
   page_url?: string;
+  // Phase 1 structured tester intake (PHASE1_07)
+  stage_reached?: string;
+  completed_full_flow?: string;
+  approval_logic_feedback?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -37,6 +41,9 @@ export async function POST(request: NextRequest) {
       email: body.email?.slice(0, 80) || 'anonymous',
       wallet: body.wallet?.slice(0, 20) || 'none',
       page_url: body.page_url,
+      stage_reached: body.stage_reached || 'none',
+      completed_full_flow: body.completed_full_flow || 'unknown',
+      approval_logic_feedback: body.approval_logic_feedback?.slice(0, 300) || undefined,
       timestamp: new Date().toISOString(),
     });
 
@@ -47,12 +54,17 @@ export async function POST(request: NextRequest) {
         tags: {
           feedback_category: body.category,
           feedback_rating: String(body.rating),
+          feedback_stage: body.stage_reached || 'none',
+          feedback_completion: body.completed_full_flow || 'unknown',
         },
         extra: {
           message: body.message.slice(0, 500),
           email: body.email,
           wallet_prefix: body.wallet?.slice(0, 12),
           page_url: body.page_url,
+          stage_reached: body.stage_reached,
+          completed_full_flow: body.completed_full_flow,
+          approval_logic_feedback: body.approval_logic_feedback?.slice(0, 1000),
         },
       });
     } catch {

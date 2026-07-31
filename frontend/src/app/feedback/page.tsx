@@ -14,6 +14,7 @@ import {
   Loader2,
   CheckCircle2,
   ArrowRight,
+  FlaskConical,
 } from 'lucide-react';
 
 const FEEDBACK_CATEGORIES = [
@@ -26,6 +27,23 @@ const FEEDBACK_CATEGORIES = [
 const STARS = [1, 2, 3, 4, 5];
 const STAR_LABELS = ['Poor', 'Fair', 'Good', 'Very Good', 'Excellent'];
 
+// ─── Phase 1 structured tester intake (PHASE1_07) ───
+const TEST_STAGES = [
+  { value: 'none', label: 'Did not start' },
+  { value: '01', label: '01 · Get Verified' },
+  { value: '02', label: '02 · Submit Evidence' },
+  { value: '03', label: '03 · Technician Approval' },
+  { value: '04', label: '04 · Supervisor Approval' },
+  { value: '05', label: '05 · Auditor Certification' },
+  { value: '06', label: '06 · Compliance Certificate' },
+] as const;
+
+const COMPLETION_OPTIONS = [
+  { value: 'full', label: 'Yes — completed the full flow' },
+  { value: 'partial', label: 'Partially' },
+  { value: 'no', label: 'No — got stuck' },
+] as const;
+
 export default function FeedbackPage() {
   const { isConnected, address } = useSoroban();
 
@@ -34,6 +52,9 @@ export default function FeedbackPage() {
   const [hoveredStar, setHoveredStar] = useState(0);
   const [message, setMessage] = useState('');
   const [email, setEmail] = useState('');
+  const [stageReached, setStageReached] = useState<string>('none');
+  const [completion, setCompletion] = useState<string>('');
+  const [approvalLogicFeedback, setApprovalLogicFeedback] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +85,9 @@ export default function FeedbackPage() {
           email: email.trim() || undefined,
           wallet: address,
           page_url: typeof window !== 'undefined' ? window.location.href : '',
+          stage_reached: stageReached,
+          completed_full_flow: completion,
+          approval_logic_feedback: approvalLogicFeedback.trim() || undefined,
         }),
       }).catch(() => {
         // Silent fallback — Sentry may not be configured locally
@@ -74,8 +98,20 @@ export default function FeedbackPage() {
       try {
         const eventId = Sentry.captureMessage(`Feedback: ${category}`, {
           level: 'info',
-          tags: { feedback_category: category, feedback_rating: String(rating) },
-          extra: { message, email: email || 'anonymous', wallet: address },
+          tags: {
+            feedback_category: category,
+            feedback_rating: String(rating),
+            feedback_stage: stageReached,
+            feedback_completion: completion || 'unknown',
+          },
+          extra: {
+            message,
+            email: email || 'anonymous',
+            wallet: address,
+            stage_reached: stageReached,
+            completed_full_flow: completion,
+            approval_logic_feedback: approvalLogicFeedback.trim() || undefined,
+          },
         });
         Sentry.captureUserFeedback({
           event_id: eventId,
@@ -224,6 +260,65 @@ export default function FeedbackPage() {
                   {STAR_LABELS[rating - 1]}
                 </span>
               )}
+            </div>
+          </div>
+
+          {/* Phase 1 structured tester intake */}
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="h-4 w-4 text-amber-600" />
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">
+                Technical Preview Tester Report
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-amber-800">
+              Testing the six-stage compliance flow? These fields help us turn your report into
+              targeted fixes. Optional — fill in what applies.
+            </p>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium text-amber-900 mb-1.5">
+                  Which stage did you reach?
+                </label>
+                <select
+                  value={stageReached}
+                  onChange={(e) => setStageReached(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-amber-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+                >
+                  {TEST_STAGES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-amber-900 mb-1.5">
+                  Did you complete the full flow?
+                </label>
+                <select
+                  value={completion}
+                  onChange={(e) => setCompletion(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-amber-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+                >
+                  <option value="">— select —</option>
+                  {COMPLETION_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-xs font-medium text-amber-900 mb-1.5">
+                Anything confusing about the approval or certificate logic?
+              </label>
+              <textarea
+                value={approvalLogicFeedback}
+                onChange={(e) => setApprovalLogicFeedback(e.target.value)}
+                placeholder="e.g. I expected the record to become compliant after the supervisor approved, but nothing changed until the auditor acted."
+                rows={2}
+                className="w-full resize-none rounded-xl border border-amber-200 bg-white p-3 text-sm text-slate-800 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+              />
             </div>
           </div>
 

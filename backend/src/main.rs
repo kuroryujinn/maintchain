@@ -29,6 +29,7 @@ use soroban_client::{get_onchain_attestation, get_onchain_record};
 mod tx_log;
 
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use axum::http::{HeaderValue, Method};
 
 use tracing::{error, info, warn};
 
@@ -1175,16 +1176,39 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState { db };
 
-    // CORS — allow configured origin or localhost:3000 for development
+    // CORS — explicit allow-list, environment-driven.
+    //
+    // Phase 1 hardening: previously `CorsLayer::permissive()` / a predicate with a
+    // "*" wildcard escape. Now only origins listed in ALLOWED_ORIGINS
+    // (comma-separated) are accepted, plus localhost:3000 as a dev fallback.
+    // Set ALLOWED_ORIGINS in Render's env config (e.g. the Vercel production
+    // domain + any preview domains used by testers).
+    let allowed_origins: Vec<HeaderValue> = std::env::var("ALLOWED_ORIGINS")
+        .map(|s| {
+            s.split(',')
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_else(|_| vec!["http://localhost:3000".to_string()])
+        .iter()
+        .filter_map(|o| o.parse::<HeaderValue>().ok())
+        .collect();
+
+    if allowed_origins.is_empty() {
+        warn!("ALLOWED_ORIGINS produced no valid origins — CORS will reject all browser origins. Set ALLOWED_ORIGINS in Render env config.");
+    } else {
+        info!("CORS allowed origins: {allowed_origins:?}");
+    }
+
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin: &axum::http::HeaderValue, _parts: &axum::http::request::Parts| {
-            let allowed = std::env::var("CORS_ORIGIN")
-                .unwrap_or_else(|_| "http://localhost:3000".to_string());
-            // Compare the origin header value as bytes against the configured origin
-            origin.as_bytes() == allowed.as_bytes() || allowed == "*"
-        }))
-        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
-        .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE]);
+        .allow_origin(AllowOrigin::list(allowed_origins))
+        // The API surface is GET + POST only (confirmed against all routes in main.rs)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+        ]);
 
     // ─── Build protected and public route trees ───
     // Public routes (no MAINTCHAIN_API_KEY required):
