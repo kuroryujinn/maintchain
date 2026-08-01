@@ -48,12 +48,31 @@ Now you can register directly in the app! No need for command-line tools:
 
 1. Go to **[Register](/register)** in the navigation
 2. Your connected wallet is detected automatically
-3. Fill in your **name**, select your **role** (Technician, Supervisor, Auditor, Owner, or Regulator)
-4. Add your **organization** (optional)
-5. Click **Register on MaintChain**
-6. ✅ You're now a registered network participant!
+3. **Approve the signature challenge** in Freighter — this creates your session cookie and is required before any account action
+4. Fill in your **name**, select your **role** — exactly one of **Technician, Supervisor, Auditor, Equipment Owner** (these are the four roles the backend accepts; "Regulator" is not a registration role)
+5. Add your **organization** (optional)
+6. Click **Register on MaintChain**
+7. ✅ You're now a registered network participant!
 
-### 5. Explore the Platform
+> **Already registered?** If your wallet already has a profile, the page shows an **Already Registered** panel (with links to Dashboard and Get Verified) instead of the form. Registering the same wallet twice is rejected with a clean message — it is not a server error.
+
+### 5. Get Verified (Prove Your Identity On-Chain)
+
+Get Verified writes your identity (role, organization, and a SHA-256 hash of your profile) to the on-chain `IdentityRegistry` contract — a portable identity that travels with your Stellar wallet:
+
+1. Go to **[Get Verified](/get-verified)** and click **Start Verification**
+2. Connect Freighter (Testnet) and approve the signature challenge
+3. The app checks backend readiness, then looks up your wallet:
+   - **Not registered yet** → a "Create Your Identity Profile" form appears
+   - **Already registered** → it jumps straight to Review & Execute
+4. If the form appeared, fill in name / role / organization, then **Create Profile & Continue**
+5. On the Review screen, click **Sign Verification Transaction**
+6. Approve the transaction in Freighter (pays a small amount of testnet XLM for gas)
+7. Wait for confirmation → **success screen** with your transaction hash and a **View on Stellar Expert** link (`https://stellar.expert/explorer/testnet/tx/<hash>`)
+
+**Under the hood:** the page hashes your profile and organization, calls `IdentityRegistry.verify_identity` via the simulate → sign → submit → poll pipeline, then mirrors the result to the backend.
+
+### 6. Explore the Platform
 
 Once registered, try these paths based on your role:
 
@@ -76,7 +95,12 @@ Once registered, try these paths based on your role:
 
 1. **Connect wallet** (see Quick Start above)
 2. **Register at** [`/register`](/register) — web form, no terminal needed
-3. Go to **Upload Evidence** (`/upload`)
+3. **Get Verified** at [`/get-verified`](/get-verified) — prove your identity on-chain (see Quick Start step 5)
+4. Go to **Upload Evidence** (`/upload`)
+5. Enter a maintenance record UUID (e.g., `11111111-1111-1111-1111-111111111101` — you'll need a matching record in the backend)
+6. Drag and drop any file (photo, screenshot, PDF)
+7. Click **Submit Evidence**
+8. ✅ You've submitted evidence to the blockchain!
 4. Enter a maintenance record UUID (e.g., `11111111-1111-1111-1111-111111111101` — you'll need a matching record in the backend)
 5. Drag and drop any file (photo, screenshot, PDF)
 6. Click **Submit Evidence**
@@ -86,7 +110,7 @@ Once registered, try these paths based on your role:
 
 *Try this if you want to simulate being a maintenance supervisor.*
 
-1. **Connect wallet** (and register at `/register`)
+1. **Connect wallet** (and register at `/register`; optionally Get Verified at `/get-verified`)
 2. Go to **Approval Center** (`/approve`)
 3. You'll see pending maintenance records (fetched from backend API)
 4. Click **Approve** or **Reject** on a record
@@ -97,7 +121,7 @@ Once registered, try these paths based on your role:
 
 *Try this if you want to simulate being a compliance auditor.*
 
-1. **Connect wallet**
+1. **Connect wallet** (and register at `/register`; optionally Get Verified at `/get-verified`)
 2. Go to **Audit Timeline** (`/audit`)
 3. Review the full approval history
 4. Click **Issue Compliance Certificate**
@@ -150,6 +174,11 @@ After exploring, please rate MaintChain at:
 | Connection popup doesn't appear | Check your browser's popup blocker |
 | Balance shows 0 XLM | Use Friendbot to get free test tokens |
 | "Simulation failed" | The Soroban RPC may be slow — try again in a few seconds |
+| "Signature Rejected" | You declined the transaction in Freighter — re-approve on retry |
+| "User Lookup Failed" | Non-404 error from the profile lookup (backend/network issue) — try again |
+| "Confirmation Timeout" | Transaction submitted but not confirmed within ~15s of polling — check Stellar Expert via the shown hash |
+| "Already Registered" | Your wallet already has a profile — use the Dashboard or Get Verified |
+| "Contract Not Configured" | The IdentityRegistry contract ID is missing from the deployment env — contact the operator |
 
 ---
 
@@ -158,7 +187,8 @@ After exploring, please rate MaintChain at:
 To verify your wallet interaction for Level 5 tracking:
 
 1. Register at [`/register`](/register) — your wallet address is stored in the system
-2. Take a screenshot showing your connected wallet in the MaintChain app
+2. Get Verified at [`/get-verified`](/get-verified) — your on-chain identity is recorded in the `IdentityRegistry` contract
+3. Take a screenshot showing your connected wallet in the MaintChain app
 3. Submit feedback at [`/feedback`](/feedback) with a rating
 4. Your wallet connection and feedback events are captured in the system
 
