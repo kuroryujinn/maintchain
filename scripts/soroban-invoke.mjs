@@ -23,7 +23,7 @@
 //   or
 //   { "success": false, "error": "..." }
 
-import { Contract, TransactionBuilder, Networks, BASE_FEE, xdr, nativeToScVal, Memo } from '@stellar/stellar-sdk';
+import { Contract, TransactionBuilder, Networks, BASE_FEE, xdr, nativeToScVal, Account } from '@stellar/stellar-sdk';
 
 function hexToScVal(hex) {
   const clean = hex.replace('0x', '').padStart(64, '0');
@@ -55,20 +55,29 @@ async function main() {
 
     const op = contract.call(method, ...scvalArgs);
 
-    // Build a minimal tx for simulation
+    // Build a minimal tx for simulation.
+    // TransactionBuilder requires a real Account-like source (it calls
+    // source.sequenceNumber()); use a dummy all-zeros account — this is
+    // simulate-only, so no real account or signature is needed.
     const tx = new TransactionBuilder(
-      { sequence: '0', accountId: () => '' },
+      new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0'),
       { fee: BASE_FEE, networkPassphrase: passphrase }
     )
       .addOperation(op)
-      .addMemo(Memo.text('simulate'))
       .setTimeout(30)
       .build();
 
-    const simRes = await fetch(`${rpcUrl}/simulateTransaction`, {
+    // Stellar RPC is a single JSON-RPC 2.0 POST endpoint at the base URL.
+    // Path-based endpoints (e.g. /simulateTransaction) return 404.
+    const simRes = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transaction: tx.toXDR() }),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'simulateTransaction',
+        params: { transaction: tx.toXDR() },
+      }),
     });
 
     if (!simRes.ok) {
@@ -77,12 +86,13 @@ async function main() {
     }
 
     const simData = await simRes.json();
-    if (simData.error) throw new Error(`Simulation error: ${simData.error}`);
+    if (simData.error) throw new Error(`Simulation error: ${simData.error.message || simData.error}`);
 
+    const result = simData.result || {};
     console.log(JSON.stringify({
       success: true,
-      result: simData.result || null,
-      transactionData: simData.transactionData || null,
+      result: result.result || null,
+      transactionData: result.transactionData || null,
       raw: simData,
     }));
   } catch (e) {

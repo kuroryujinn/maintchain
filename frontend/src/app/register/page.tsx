@@ -1,30 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import FadeInView from '@/components/maintchain/FadeInView';
 import { EditorialSectionHeader, StatusBadge } from '@/components/maintchain/ui';
 import { useSoroban } from '@/hooks/useSoroban';
-import { api, ApiError } from '@/lib/api';
-import { CheckCircle2, ExternalLink, Loader2, UserPlus, Wallet, AlertCircle } from 'lucide-react';
-
-const ROLES = [
-  { value: 'technician', label: 'Technician', description: 'Field worker who performs maintenance and submits evidence' },
-  { value: 'supervisor', label: 'Supervisor', description: 'Site-level manager who verifies evidence and approves work' },
-  { value: 'auditor', label: 'Auditor', description: 'Compliance officer who issues final certificates' },
-  { value: 'owner', label: 'Equipment Owner', description: 'Company that owns industrial equipment' },
-  { value: 'regulator', label: 'Regulator / Inspector', description: 'External party who verifies compliance' },
-];
+import { api } from '@/lib/api';
+import type { UserResponse } from '@/lib/api-types';
+import { ROLE_OPTIONS } from '@/lib/roles';
+import { registrationErrorMessage } from '@/lib/registration-error';
+import { CheckCircle2, ExternalLink, Loader2, UserPlus, UserCheck, Wallet, AlertCircle } from 'lucide-react';
 
 export default function RegisterPage() {
   const { isConnected, address, connectWallet } = useSoroban();
 
   const [name, setName] = useState('');
-  const [role, setRole] = useState('technician');
+  const [role, setRole] = useState('TECHNICIAN');
   const [organization, setOrganization] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ id: string; address: string } | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [existingUser, setExistingUser] = useState<UserResponse | null>(null);
+  const [checkingExisting, setCheckingExisting] = useState(false);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,15 +46,36 @@ export default function RegisterPage() {
       });
       setSuccess({ id: result.id, address: result.stellar_address || address });
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.message);
-      } else {
-        setError('Registration failed. Please try again.');
-      }
+      setError(registrationErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
+
+  // If the connected wallet is already registered, don't offer the form again —
+  // show the "Already Registered" panel instead. This prevents the backend's
+  // 409 Conflict (duplicate users_stellar_address_key) from ever being hit via
+  // the normal flow.
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    let cancelled = false;
+    setCheckingExisting(true);
+    (async () => {
+      try {
+        const user = await api.getUserByStellar(address);
+        if (!cancelled) setExistingUser(user);
+      } catch {
+        // 404 = not registered yet (normal); any other error → stay on the
+        // form and let the POST surface the real problem.
+        if (!cancelled) setExistingUser(null);
+      } finally {
+        if (!cancelled) setCheckingExisting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isConnected, address]);
 
   if (success) {
     return (
@@ -88,7 +106,7 @@ export default function RegisterPage() {
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-[var(--text-secondary)]">Role</span>
-              <StatusBadge tone="info">{role.charAt(0).toUpperCase() + role.slice(1)}</StatusBadge>
+              <StatusBadge tone="info">{ROLE_OPTIONS.find((r) => r.value === role)?.label ?? role}</StatusBadge>
             </div>
           </div>
 
@@ -172,6 +190,58 @@ export default function RegisterPage() {
               Connect Wallet
             </button>
           </div>
+        ) : checkingExisting ? (
+          <div className="flex flex-col items-center justify-center py-14">
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--primary)]" />
+            <p className="mt-4 text-sm text-[var(--text-secondary)]">Checking registration status...</p>
+          </div>
+        ) : existingUser ? (
+          <div className="text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
+              <UserCheck className="h-8 w-8 text-emerald-600" />
+            </div>
+            <h2 className="mt-6 text-xl font-semibold text-[var(--text-primary)]">
+              Already Registered
+            </h2>
+            <p className="mt-3 text-sm text-[var(--text-secondary)]">
+              This Stellar wallet is already linked to a MaintChain profile.
+              Head to the dashboard, or continue with identity verification.
+            </p>
+
+            <div className="mt-8 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 text-left">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[var(--text-secondary)]">Name</span>
+                <span className="font-medium text-[var(--text-primary)]">{existingUser.name}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[var(--text-secondary)]">Role</span>
+                <StatusBadge tone="info">
+                  {ROLE_OPTIONS.find((r) => r.value === existingUser.role)?.label ?? existingUser.role}
+                </StatusBadge>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[var(--text-secondary)]">Wallet</span>
+                <span className="font-mono text-xs text-[var(--text-primary)]">
+                  {existingUser.stellar_address?.slice(0, 8)}...{existingUser.stellar_address?.slice(-6)}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+              <a
+                href="/dashboard"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-[var(--primary)] px-8 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                Go to Dashboard <ExternalLink className="h-4 w-4" />
+              </a>
+              <a
+                href="/get-verified"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-8 py-3 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-white"
+              >
+                Continue Verification
+              </a>
+            </div>
+          </div>
         ) : (
           <form onSubmit={handleRegister} className="space-y-6">
             <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4">
@@ -214,7 +284,7 @@ export default function RegisterPage() {
                 Role
               </label>
               <div className="grid gap-3">
-                {ROLES.map((r) => (
+                {ROLE_OPTIONS.map((r) => (
                   <button
                     key={r.value}
                     type="button"

@@ -2,6 +2,7 @@
 name = "maintchain-backend"
 version = "0.1.0"
 edition = "2021"
+default-run = "maintchain-backend"
 
 [dependencies]
 axum = { version = "0.7", features = ["multipart"] }
@@ -41,6 +42,11 @@ rand = "0.8"
 # Monitoring & error tracking (Sentry)
 sentry = "0.48"
 sentry-tower = "0.48"
+
+# Seeder binary (src/seed_main.rs) — run with: cargo run --bin seed
+[[bin]]
+name = "seed"
+path = "src/seed_main.rs"
 
 [build-dependencies]
 soroban-sdk = { version = "21" } # For building contracts locally

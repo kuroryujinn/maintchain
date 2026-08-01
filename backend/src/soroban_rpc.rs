@@ -207,7 +207,9 @@ pub async fn simulate_contract_call(
     args: Vec<ScVal>,
 ) -> Result<SimulateResult, StatusCode> {
     let url = rpc_url();
-    let rpc_endpoint = format!("{}/simulateTransaction", url.trim_end_matches('/'));
+    // Stellar RPC is a single JSON-RPC 2.0 POST endpoint at the base URL.
+    // Path-based endpoints (e.g. /simulateTransaction) return 404.
+    let rpc_endpoint = url.trim_end_matches('/').to_string();
 
     let contract_hex = hex::encode(contract_id);
     info!("soroban_rpc: simulate {contract_hex}/{method} via {rpc_endpoint}");
@@ -295,7 +297,9 @@ pub async fn simulate_contract_call(
 /// Verify a transaction hash via the Soroban RPC `getTransaction` endpoint.
 pub async fn get_transaction(tx_hash: &str) -> Result<Value, StatusCode> {
     let url = rpc_url();
-    let rpc_endpoint = format!("{}/getTransaction", url.trim_end_matches('/'));
+    // Stellar RPC is a single JSON-RPC 2.0 POST endpoint at the base URL.
+    // Path-based endpoints (e.g. /getTransaction) return 404.
+    let rpc_endpoint = url.trim_end_matches('/').to_string();
 
     let body = json!({
         "jsonrpc": "2.0",

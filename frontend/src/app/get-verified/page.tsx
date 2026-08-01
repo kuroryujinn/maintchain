@@ -6,18 +6,10 @@ import { ArrowRight, CheckCircle, ExternalLink, Loader2, AlertTriangle, Wallet, 
 
 import { useSoroban, IDENTITY_REGISTRY_ID } from '@/hooks/useSoroban';
 import { u32ScVal } from '@/lib/soroban';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import type { UserResponse } from '@/lib/api-types';
-
-// ─── Role code mapping (matching backend CHECK constraint) ───
-const ROLE_CODES: Record<string, number> = {
-  TECHNICIAN: 1,
-  SUPERVISOR: 2,
-  AUDITOR: 3,
-  OWNER: 4,
-};
-
-const ALLOWED_ROLES = ['TECHNICIAN', 'SUPERVISOR', 'AUDITOR', 'OWNER'];
+import { ALLOWED_ROLES, ROLE_CODES } from '@/lib/roles';
+import { isDuplicateRegistration } from '@/lib/registration-error';
 
 // ─── Step enum ───
 type Step =
@@ -222,10 +214,21 @@ export default function GetVerifiedPage() {
         setRole(user.role);
         setOrganization(user.organization || '');
         setStep('review_verification');
-      } catch {
-        // User not found — show form
-        setExistingUser(null);
-        setStep('user_form');
+      } catch (e) {
+        // A genuine 404 means this wallet is not registered yet — show the form.
+        // Any OTHER failure (5xx, network, proxy) must be surfaced as an error
+        // instead of silently masquerading as "user not found".
+        if (e instanceof ApiError && e.status === 404) {
+          setExistingUser(null);
+          setStep('user_form');
+        } else {
+          setError(
+            'User Lookup Failed',
+            e instanceof Error
+              ? e.message
+              : 'Could not check whether your wallet is registered. Please try again.',
+          );
+        }
       }
     } catch (e: any) {
       const msg = e?.message || String(e);
@@ -261,6 +264,22 @@ export default function GetVerifiedPage() {
       setExistingUser(user);
       setStep('review_verification');
     } catch (e: any) {
+      // Wallet already registered (backend returns 409 for the duplicate
+      // users_stellar_address_key). Recover gracefully by loading the existing
+      // profile and proceeding to review instead of surfacing an error.
+      if (isDuplicateRegistration(e) && soroban.address) {
+        try {
+          const user = await api.getUserByStellar(soroban.address);
+          setExistingUser(user);
+          setName(user.name);
+          setRole(user.role);
+          setOrganization(user.organization || '');
+          setStep('review_verification');
+          return;
+        } catch {
+          // fall through to the error panel below
+        }
+      }
       setError('Registration Failed', e?.message || 'Could not create user profile.');
     }
   }, [soroban.address, name, role, organization, setError]);

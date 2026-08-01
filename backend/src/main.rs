@@ -749,7 +749,7 @@ async fn register_user(
     }
 
     let id = Uuid::new_v4();
-    sqlx::query(
+    let insert = sqlx::query(
         r#"INSERT INTO users (id, stellar_address, name, role, organization) VALUES ($1, $2, $3, $4, $5)"#,
     )
     .bind(id)
@@ -758,11 +758,24 @@ async fn register_user(
     .bind(&req.role)
     .bind(&req.organization)
     .execute(&state.db)
-    .await
-    .map_err(|e| {
+    .await;
+
+    if let Err(e) = insert {
+        // A duplicate stellar_address is a client-side condition (Postgres
+        // SQLSTATE 23505), not a server failure — return 409 Conflict with a
+        // clear message instead of a raw 500. Previously this made a second
+        // registration attempt look like a server crash in the browser.
+        if let sqlx::Error::Database(db_err) = &e {
+            if db_err.code().as_deref() == Some("23505") {
+                return Err((
+                    StatusCode::CONFLICT,
+                    "This Stellar wallet is already registered. Visit /dashboard to view your profile.".to_string(),
+                ));
+            }
+        }
         error!("register_user failed: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
 
     let row = sqlx::query_as::<_, UserResponse>(
         r#"SELECT id, stellar_address, name, role, organization, created_at FROM users WHERE id = $1"#,

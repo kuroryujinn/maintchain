@@ -1,6 +1,11 @@
 // frontend/src/lib/soroban.ts
 // Soroban contract interaction using @stellar/stellar-sdk v13 + Freighter v6
 // Builds transactions, simulates via RPC, signs with Freighter, submits to Soroban RPC.
+//
+// RPC transport: Stellar RPC is a single JSON-RPC 2.0 POST endpoint at the base
+// URL (e.g. https://soroban-testnet.stellar.org). Path-based endpoints like
+// /simulateTransaction or /accounts/:address return 404, so all calls go through
+// the rpcRequest() helper below.
 
 import { signTransaction } from '@stellar/freighter-api';
 import {
@@ -11,13 +16,95 @@ import {
   nativeToScVal,
   SorobanDataBuilder,
   xdr,
-  Memo,
   Address,
+  Keypair,
+  Account,
 } from '@stellar/stellar-sdk';
 
 const SOROBAN_RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const NETWORK_PASSPHRASE = Networks.TESTNET;
+
+/**
+ * POST a JSON-RPC 2.0 request to the Soroban RPC endpoint.
+ * Returns the `result` object from the envelope. Throws on HTTP failures and
+ * JSON-RPC-level errors (simulation-level errors are returned in `result.error`
+ * and are handled by the callers, matching the previous API shape).
+ */
+async function rpcRequest<T = any>(
+  method: string,
+  params: Record<string, unknown>,
+): Promise<T> {
+  const res = await fetch(SOROBAN_RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`RPC ${method} failed (${res.status}): ${await res.text().catch(() => '')}`);
+  }
+
+  const data = await res.json();
+  if (data.error) {
+    const msg = typeof data.error === 'string' ? data.error : data.error?.message ?? 'unknown RPC error';
+    throw new Error(`RPC ${method} error: ${msg}`);
+  }
+  return data.result as T;
+}
+
+/**
+ * Fetch an account's current sequence number via getLedgerEntries
+ * (the JSON-RPC replacement for the removed GET /accounts/:address endpoint).
+ */
+async function getAccountSequence(sourceAddress: string): Promise<string> {
+  const ledgerKey = xdr.LedgerKey.account(
+    new xdr.LedgerKeyAccount({
+      accountId: Keypair.fromPublicKey(sourceAddress).xdrPublicKey(),
+    }),
+  );
+
+  const result = await rpcRequest<{ entries?: { xdr: string }[] }>('getLedgerEntries', {
+    keys: [ledgerKey.toXDR('base64')],
+  });
+
+  const entry = result?.entries?.[0];
+  if (!entry) {
+    throw new Error(`Failed to get account: ${sourceAddress}`);
+  }
+
+  return parseAccountSeqNum(entry.xdr);
+}
+
+/**
+ * Parse the account sequence number from a getLedgerEntries entry XDR.
+ *
+ * The Stellar RPC getLedgerEntries endpoint returns each entry as a
+ * LedgerEntryData XDR (the entry body WITHOUT the 4-byte
+ * lastModifiedLedgerSeq header). Decoding it as a full LedgerEntry misaligns
+ * the structure — the first 4 bytes (LedgerEntryType) are consumed as the
+ * header, so the PublicKeyType enum inside the AccountEntry is read at the
+ * wrong offset and throws "XDR Read Error: unknown PublicKeyType member for
+ * value ...". That bug broke EVERY on-chain call (get-verified, approve,
+ * upload, audit) at the account-sequence step.
+ *
+ * We parse as LedgerEntryData first (matches the live RPC), falling back to
+ * LedgerEntry only if a future RPC returns the full entry shape.
+ */
+export function parseAccountSeqNum(entryXdr: string): string {
+  try {
+    return xdr.LedgerEntryData.fromXDR(entryXdr, 'base64')
+      .account()
+      .seqNum()
+      .toString();
+  } catch {
+    return xdr.LedgerEntry.fromXDR(entryXdr, 'base64')
+      .data()
+      .account()
+      .seqNum()
+      .toString();
+  }
+}
 
 export interface ContractCallResult {
   transactionHash: string;
@@ -49,26 +136,19 @@ export async function simulateContract(
   const contract = new Contract(contractId);
   const op = contract.call(method, ...args);
 
+  // Note: no memo — Soroban transactions reject memos on the live RPC.
   const tx = new TransactionBuilder(
-    { sequence: '0', accountId: () => '' } as any,
+    new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0'),
     { fee: BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE },
   )
     .addOperation(op)
-    .addMemo(Memo.text('simulate'))
     .setTimeout(30)
     .build();
 
-  const res = await fetch(`${SOROBAN_RPC_URL}/simulateTransaction`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transaction: tx.toXDR() }),
+  const simulation = await rpcRequest<any>('simulateTransaction', {
+    transaction: tx.toXDR(),
   });
 
-  if (!res.ok) {
-    throw new Error(`Simulation failed (${res.status}): ${await res.text().catch(() => '')}`);
-  }
-
-  const simulation = await res.json();
   if (simulation.error) throw new Error(`Simulation error: ${simulation.error}`);
   if (!simulation.result?.retval) throw new Error('Simulation returned no result value');
 
@@ -94,17 +174,12 @@ export async function invokeContract(
   const op = contract.call(method, ...args);
 
   // 1. Get account sequence from Soroban RPC
-  // 1. Get account sequence from Soroban RPC
   onStatusChange?.({ state: 'simulating' });
-  const accountRes = await fetch(
-    `${SOROBAN_RPC_URL}/accounts/${encodeURIComponent(sourceAddress)}`,
-  );
-  if (!accountRes.ok) throw new Error(`Failed to get account: ${accountRes.statusText}`);
-  const { sequence } = await accountRes.json();
+  const sequence = await getAccountSequence(sourceAddress);
 
   // 2. Build initial transaction
   const tx = new TransactionBuilder(
-    { sequence, accountId: () => sourceAddress } as any,
+    new Account(sourceAddress, sequence),
     { fee: BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE },
   )
     .addOperation(op)
@@ -113,17 +188,10 @@ export async function invokeContract(
 
   // 3. Simulate to get footprint + resource fees
   onStatusChange?.({ state: 'simulating' });
-  const simRes = await fetch(`${SOROBAN_RPC_URL}/simulateTransaction`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transaction: tx.toXDR() }),
+  const simulation = await rpcRequest<any>('simulateTransaction', {
+    transaction: tx.toXDR(),
   });
 
-  if (!simRes.ok) {
-    onStatusChange?.({ state: 'failed', reason: `Simulation failed: ${simRes.statusText}` });
-    throw new Error(`Simulation failed: ${simRes.statusText}`);
-  }
-  const simulation = await simRes.json();
   if (simulation.error) {
     onStatusChange?.({ state: 'failed', reason: `Simulation error: ${simulation.error}` });
     throw new Error(`Simulation error: ${simulation.error}`);
@@ -140,7 +208,7 @@ export async function invokeContract(
   const sorobanData = xdr.SorobanTransactionData.fromXDR(transactionData, 'base64');
 
   const finalTx = new TransactionBuilder(
-    { sequence, accountId: () => sourceAddress } as any,
+    new Account(sourceAddress, sequence),
     {
       fee: BASE_FEE,
       networkPassphrase: NETWORK_PASSPHRASE,
@@ -170,18 +238,10 @@ export async function invokeContract(
 
   // 6. Submit to Soroban RPC
   onStatusChange?.({ state: 'submitting' });
-  const sendRes = await fetch(`${SOROBAN_RPC_URL}/sendTransaction`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transaction: signed.signedTxXdr }),
+  const sendResult = await rpcRequest<any>('sendTransaction', {
+    transaction: signed.signedTxXdr,
   });
 
-  if (!sendRes.ok) {
-    onStatusChange?.({ state: 'failed', reason: `Submit failed: ${sendRes.statusText}` });
-    throw new Error(`Submit failed: ${sendRes.statusText}`);
-  }
-
-  const sendResult = await sendRes.json();
   const txHash: string = sendResult.hash || 'unknown';
   let txStatus = sendResult.status;
 
@@ -192,13 +252,12 @@ export async function invokeContract(
     for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
       onStatusChange?.({ state: 'pending', attempt: i + 1, maxAttempts: MAX_POLL_ATTEMPTS });
       await new Promise((r) => setTimeout(r, 1000));
-      const pollRes = await fetch(
-        `${SOROBAN_RPC_URL}/getTransaction/${encodeURIComponent(txHash)}`,
-      );
-      if (pollRes.ok) {
-        pollResult = await pollRes.json();
+      try {
+        pollResult = await rpcRequest<any>('getTransaction', { hash: txHash });
         txStatus = pollResult.status;
         if (txStatus === 'SUCCESS' || txStatus === 'FAILED') break;
+      } catch {
+        // Transient RPC failure — keep polling
       }
     }
   }
@@ -242,12 +301,13 @@ export async function invokeContract(
 export async function pollTransactionStatus(
   txHash: string,
 ): Promise<'SUCCESS' | 'FAILED' | 'PENDING'> {
-  const res = await fetch(
-    `${SOROBAN_RPC_URL}/getTransaction/${encodeURIComponent(txHash)}`,
-  );
-  if (!res.ok) return 'PENDING';
-  const data = await res.json();
-  return (data?.status ?? 'PENDING') as 'SUCCESS' | 'FAILED' | 'PENDING';
+  try {
+    const data = await rpcRequest<{ status?: string }>('getTransaction', { hash: txHash });
+    const status = data?.status ?? 'PENDING';
+    return status === 'SUCCESS' || status === 'FAILED' ? status : 'PENDING';
+  } catch {
+    return 'PENDING';
+  }
 }
 
 /**

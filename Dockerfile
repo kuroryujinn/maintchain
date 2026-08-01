@@ -24,7 +24,7 @@ COPY backend/src/ src/
 COPY backend/migrations/ migrations/
 
 # Build release binary (all dependencies compiled here)
-RUN cargo build --release
+RUN cargo build --release --bin maintchain-backend
 
 # ─── Stage 2: Runtime ────────────────────────────────────
 FROM debian:bookworm-slim

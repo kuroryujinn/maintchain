@@ -307,6 +307,12 @@ cargo run
 
 The backend listens on `http://127.0.0.1:8081`.
 
+Optional — after deploying contracts, set the IdentityRegistry address so verification rows record the real contract ID (if unset, `user_verifications.verification_contract_id` stores `'unknown'`):
+
+```bash
+export IDENTITY_REGISTRY_CONTRACT_ID=<contract_id>
+```
+
 **Health check:**
 
 ```bash
@@ -348,6 +354,8 @@ NEXT_PUBLIC_IDENTITY_REGISTRY_ID=<contract_id>
 BACKEND_URL=http://localhost:8081          # Rust backend URL
 MAINTCHAIN_API_KEY=<shared_secret>        # Must match backend
 AUTH_SECRET=<random_hmac_secret>          # For signing session cookies
+
+
 ```
 
 Start dev server:
@@ -368,6 +376,59 @@ Open `http://localhost:3000`.
 5. Confirm the authorization prompt
 
 The dashboard displays your Stellar address, XLM balance (from Horizon Testnet), and network status.
+
+### 6. Register & Get Verified (User Guide)
+
+The platform has two onboarding flows. **Register** (`/register`) creates your off-chain profile row in Postgres. **Get Verified** (`/get-verified`) proves your identity on-chain by writing your role, organization, and SHA-256 identity hashes to the `IdentityRegistry` Soroban contract.
+
+Both flows require the two-layer session: after connecting Freighter you must **approve the SEP-53 signature challenge** — this issues the HttpOnly cookie that authorizes backend writes on your behalf.
+
+**Prerequisites:** Freighter extension, a funded Stellar Testnet account ([Friendbot](https://lab.stellar.org/)), and the backend + frontend running locally (see Setup above).
+
+#### Register (`/register`)
+
+1. Open `http://localhost:3000/register`
+2. Click **Connect Wallet** → approve Freighter's access request
+3. Approve the **signature challenge** (SEP-53) when prompted
+4. Enter your **Full Name** (required)
+5. Select a **Role** — exactly one of the four DB-authorized values: `TECHNICIAN`, `SUPERVISOR`, `AUDITOR`, `OWNER`
+
+   > The backend `users_role_check` constraint accepts only these four uppercase values. Roles are centralized in `frontend/src/lib/roles.ts` and drift-guarded against the SQL migration by `roles.test.ts`.
+
+6. Enter **Organization** (optional)
+7. Click **Register on MaintChain**
+
+**Expected outcomes:**
+
+- **Success:** green "Registration Complete" screen showing your wallet address and role badge.
+- **Wallet already registered:** the page detects this via `GET /users/:address` and shows an **Already Registered** panel (with links to Dashboard and Get Verified) instead of the form. The backend also returns `409 Conflict` — never a 500 — for a duplicate `POST /users` (the `users_stellar_address_key` unique violation).
+
+#### Get Verified (`/get-verified`)
+
+A 7-stage flow that ends with an on-chain identity record:
+
+1. Open `http://localhost:3000/get-verified` → click **Start Verification**
+2. Connect Freighter (Testnet) and approve the signature challenge
+3. Backend readiness check — must report `database_ready: true`
+4. **Profile lookup** (`GET /users/:address`): `404` (not registered yet) → "Create Your Identity Profile" form appears; `200` (already registered) → jumps straight to Review & Execute
+5. Fill name/role/org if the form appeared, then **Create Profile & Continue**
+6. On the **Review** screen, click **Sign Verification Transaction** and approve it in Freighter (pays a small amount of testnet XLM for gas)
+7. Wait for confirmation → **success screen** with your transaction hash and a **View on Stellar Expert** link (`https://stellar.expert/explorer/testnet/tx/<hash>`)
+
+**Under the hood:** the page computes `orgHash = SHA-256(organization)` and `profileHash = SHA-256(JSON{stellar_address, name, role, organization})`, then calls `IdentityRegistry.verify_identity(address, roleCode, orgHash, profileHash)` through the invokeContract pipeline (simulate → sign → submit → poll). On success the result is mirrored to `POST /verification` (the `user_verifications` table).
+
+**Error states (all user-visible, non-crashing):**
+
+| State | Cause | What you see |
+|-------|-------|--------------|
+| `Freighter Required` | Extension not detected | Error panel with install guidance |
+| `Wrong Network` | Wallet on mainnet/public | Switch to Testnet in Freighter |
+| `Backend Unavailable` | `/verification/readiness` DB check failed | Retry after starting backend |
+| `Contract Not Configured` | `NEXT_PUBLIC_IDENTITY_REGISTRY_ID` unset | Set it in `frontend/.env.local` |
+| `User Lookup Failed` | Non-404 error from `GET /users/:address` (5xx/network) | Error panel with Try Again |
+| `Signature Rejected` | You declined in Freighter | Re-approve on retry |
+| `Simulation Failed` | Contract call simulation error | Verify the contract ID is the deployed IdentityRegistry |
+| `Confirmation Timeout` | Submitted but not confirmed within 15s of polling | Hash + Stellar Expert link + "Check again" |
 
 ---
 
@@ -470,11 +531,13 @@ node scripts/deploy-contracts.mjs
 
 The script uploads each WASM blob to Soroban RPC, deploys the contract, and prints contract IDs with `.env.local` entries.
 
+> The IdentityRegistry address in the table below is the one currently wired in `frontend/.env.local` (its `verify_identity` simulation was verified against the live Testnet RPC). Re-deploying changes these IDs — update `frontend/.env.local` and the backend `IDENTITY_REGISTRY_CONTRACT_ID` to match.
+
 **Current Testnet deployments:**
 
 | Contract | Address |
 |----------|---------|
-| IdentityRegistry | `CCCKDY2NIQOHKEFB6BIGYZYEW6YAMRBMLYP3HEDYCYHAMZQUDY26BXNW` |
+| IdentityRegistry | `CA2CSUN5T4ZJZHQ562XFHB2WVSGE2E7KS4NJ2SBFJM6CLRZIFLJP4EMC` |
 | MultiPartyApproval | `CDGJ6VX3TG4M66SBFS5LCBPTF26GEFRZXXAYNYAWYRYHG2WDJ7UYAZSC` |
 | EquipmentRegistry | `CBTOLJE5FVYO4Y473OIZIBX3OAAZAKCRODZ4LI56Q5UYMQTXRUSVC2EO` |
 | MaintenanceRecords | `CDZ324UZJCIKG32YKY4MFZX5AO63VXCK73NO5QS3QI3256UDBYR5LP6M` |
@@ -529,14 +592,14 @@ Exercises all six compliance stages:
 
 ### Get Verified Demo (7-Stage Flow)
 
-1. Open `/get-verified` -> click **Start Verification**
-2. Connect Freighter wallet (Stellar Testnet)
-3. Confirm balance visible
-4. Approve wallet signature challenge
-5. Backend readiness check passes (DB + contract configured)
-6. Create or skip user profile
-7. Sign `IdentityRegistry.verify_identity` transaction in Freighter
-8. Wait for confirmation -> success page with tx hash + explorer link
+See [User Guide: Register & Get Verified](#6-register--get-verified-user-guide) for the full walkthrough, error states, and expected outcomes. Happy-path summary:
+
+1. Open `/get-verified` → click **Start Verification**
+2. Connect Freighter wallet (Stellar Testnet) + approve the SEP-53 signature challenge
+3. Confirm balance visible; backend readiness check passes
+4. Profile lookup: `404` → registration form; `200` → straight to Review & Execute
+5. Sign `IdentityRegistry.verify_identity` transaction in Freighter
+6. Wait for confirmation → success page with tx hash + Stellar Expert link
 
 ---
 
