@@ -34,6 +34,11 @@ services:
         sync: false
       - key: ATTESTATION_CONTRACT_ID
         sync: false
+      # IdentityRegistry — must match the frontend's NEXT_PUBLIC_IDENTITY_REGISTRY_ID
+      # so /verification/readiness reports configured and verification rows store the
+      # real contract ID instead of 'unknown'.
+      - key: IDENTITY_REGISTRY_CONTRACT_ID
+        sync: false
       # DATABASE_URL intentionally omitted — managed via hardcoded fallback in main.rs
       # to avoid Render blueprint env var conflicts.
       # Do NOT set PORT — Render injects its own.
