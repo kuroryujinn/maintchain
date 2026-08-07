@@ -36,6 +36,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Standalone drift guard for the frontend role list vs. the DB
+      # users_role_check constraint (independent of the vitest suite).
+      - name: Check roles.ts matches DB role constraint
+        run: node ../scripts/check-role-drift.mjs
+
       - name: Lint
         run: npm run lint
 
@@ -58,6 +63,52 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Migration placement guard: sqlx's Migrator reads ./migrations relative to
+      # backend/ and the Dockerfile only copies backend/migrations/, so any migration
+      # file living outside backend/migrations/ would silently never be applied.
+      # Fail CI instead of letting it drift (this bit the repo with 0005_transaction_log).
+      - name: Check migration files are inside backend/migrations/
+        working-directory: ${{ github.workspace }}
+        run: |
+          misplaced=$(find . -name '*.sql' \
+            -not -path './backend/migrations/*' \
+            -not -path './backend/target/*' \
+            -not -path './frontend/node_modules/*' | sort)
+          if [ -n "$misplaced" ]; then
+            echo "::error::Migration file(s) found outside backend/migrations/:"
+            echo "$misplaced"
+            echo "Move them into backend/migrations/ so sqlx Migrator and the Dockerfile pick them up."
+            exit 1
+          fi
+          echo "✅ All migration files are inside backend/migrations/"
+
+      # Migration numbering guard: sqlx applies migrations in version order, so files
+      # must be zero-padded and sequential with no gaps (0001, 0002, ...). A gap means
+      # later migrations would never run — fail CI instead.
+      - name: Check migration files are numbered sequentially (no gaps)
+        working-directory: ${{ github.workspace }}
+        run: |
+          cd backend/migrations
+          expected=1
+          for f in $(find . -maxdepth 1 -name '*.sql' | sort); do
+            name=${f#./}
+            case "$name" in
+              [0-9][0-9][0-9][0-9]_*) ;;
+              *)
+                echo "::error::Migration '$name' does not match the NNNN_name.sql numbering pattern"
+                exit 1
+                ;;
+            esac
+            num=$((10#${name%%_*}))
+            if [ "$num" -ne "$expected" ]; then
+              echo "::error::Migration numbering gap or duplicate: expected $expected, found $num ($name)"
+              echo "Migration versions must be sequential with no gaps (0001, 0002, ...)."
+              exit 1
+            fi
+            expected=$((expected + 1))
+          done
+          echo "✅ Migrations are numbered sequentially through $((expected - 1))"
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -88,6 +139,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Workspace guard: every contract crate directory must be a member of the
+      # contracts/Cargo.toml workspace, or it is silently skipped by cargo test/build.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check workspace members match contract directories
+        run: node ../scripts/check-contract-members.mjs
 
       - name: Setup Rust nightly toolchain
         uses: dtolnay/rust-toolchain@master
