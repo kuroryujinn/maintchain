@@ -14,8 +14,6 @@ MaintChain is a **three-tier decentralized application (dApp)** comprising:
 
 The architecture follows a **dual-path pattern**: the frontend communicates with Stellar Testnet directly via Freighter for on-chain operations, and with the REST backend for off-chain CRUD workflows. These two paths are independent yet complementary — the on-chain contracts provide **immutable approval state**, while the off-chain backend provides **flexible data management and supplementary services**.
 
-> **Architecture Diagram:** Open `SYSTEM_DESIGN_DIAGRAM.html` in a browser for an interactive visual representation of this architecture.
-
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        Browser (Next.js 14)                         │
@@ -163,7 +161,8 @@ Open → Submitted → PendingApproval → Compliant
 - `create_record` — Opens a new maintenance order
 - `submit_evidence` — Attaches evidence hash and transitions to Submitted
 - `update_status` — General status transition (intended for cross-contract calls)
-- `complete_record` — Final transition to Compliant (called by ComplianceAttestation)
+- `set_authorized_completer` — Restricts which address may complete a record
+- `complete` — Final transition to Compliant (called by ComplianceAttestation)
 - `get_record` — Returns current state
 
 **Why This Contract:**
@@ -186,22 +185,34 @@ struct ApprovalState {
 **Key Functions:**
 - `approve_by_technician` / `approve_by_supervisor` / `approve_by_auditor` — Role-specific approvals
 - `reject_by_supervisor` — Rejection (resets supervisor approval)
-- `verify_compliance` — Returns `true` only if ALL required roles have approved
+- `verify` — Returns `true` only if ALL required roles have approved
 - `set_auditor_required` — Configure whether an auditor signature is needed
 
 **Why This Contract:**
-This contract is the **heart of the system**. It enforces the multi-party rule that makes MaintChain trustworthy. The `verify_compliance` function is the single source of truth for whether a maintenance record meets compliance requirements.
+This contract is the **heart of the system**. It enforces the multi-party rule that makes MaintChain trustworthy. The `verify` function is the single source of truth for whether a maintenance record meets compliance requirements.
 
 #### 3.1.4 ComplianceAttestation
 
 **Purpose:** Issue final compliance certificates.
 
 **Key Functions:**
-- `issue_certificate` — Verifies compliance via cross-contract call to MultiPartyApproval, issues attestation with cert hash, and updates MaintenanceRecords status to Compliant
+- `issue_certificate` — Verifies compliance via cross-contract call to `MultiPartyApproval.verify`, issues attestation with cert hash, and completes the record via `MaintenanceRecords.complete`
 - `get_attestation` — Returns stored attestation
 
 **Why This Contract:**
 The attestation is the **terminal artifact** of the compliance workflow. It is a permanently verifiable certificate that any party can check without contacting any off-chain system. The cross-contract invocation architecture ensures that certificates are only issued when the approval chain is complete.
+
+#### 3.1.5 IdentityRegistry
+
+**Purpose:** Verify a wallet's identity (role, organization, profile hash) on-chain, producing a portable, versioned identity record that travels with the Stellar address.
+
+**Key Functions:**
+- `verify_identity` — Writes (or re-verifies) an identity record: role code, organization hash, profile hash, version
+- `is_verified` — Returns `true` if the wallet has a stored identity record
+- `get_verification` — Returns the full identity record
+
+**Why This Contract:**
+It is the **entry point for the Get Verified flow** (`/get-verified`). A user's verified role, organization, and SHA-256 identity hashes become an immutable, portable credential — so a technician's reputation carries across employers without re-verification.
 
 ### 3.2 Backend (Service Layer)
 
@@ -213,19 +224,33 @@ The attestation is the **terminal artifact** of the compliance workflow. It is a
 |--------|------|---------|
 | GET | `/health` | Health check |
 | GET | `/health/config` | Database URL status (masked) |
-| GET | `/equipment` | List all equipment |
-| POST | `/equipment` | Register new equipment |
+| POST | `/auth/challenge` | SEP-53 challenge: create nonce |
+| POST | `/auth/verify` | SEP-53 challenge: verify signature |
+| GET/POST | `/equipment` | List / register equipment |
 | GET | `/maintenance` | List all maintenance records |
-| GET | `/maintenance/:id` | Get specific maintenance record |
+| GET | `/maintenance/pending` | List records awaiting approval |
 | POST | `/maintenance/orders` | Create maintenance order |
+| GET | `/maintenance/:id` | Get specific maintenance record |
 | POST | `/maintenance/:id/evidence` | Submit evidence hash |
+| POST | `/maintenance/:id/evidence/upload` | Upload evidence file (multipart) |
 | GET | `/maintenance/:id/audit` | Get full audit trail |
 | POST | `/maintenance/:id/approvals/supervisor` | Supervisor approve |
 | POST | `/maintenance/:id/approvals/supervisor/reject` | Supervisor reject |
 | POST | `/maintenance/:id/approvals/auditor` | Auditor approve (issue certificate) |
+| GET | `/compliance/dashboard` | Compliance dashboard summary |
+| GET | `/compliance/eligible/:id` | Check record eligibility for certification |
+| GET | `/compliance/attestation/:id` | Get on-chain attestation |
+| GET | `/onchain/record/:id` | Read on-chain maintenance record |
 | POST | `/hash/evidence` | Compute SHA-256 hash of payload |
-| POST | `/maintenance/:id/evidence/upload` | Upload evidence file (multipart) |
-| POST | `/users/register` | Register new user |
+| GET/POST | `/users` | List / register users |
+| GET | `/users/count` | Registered user count |
+| GET | `/users/:stellar_address` | Lookup user by wallet address |
+| GET | `/verification/readiness` | Get Verified readiness check |
+| GET | `/verification/:stellar_address` | Lookup verification by wallet |
+| POST | `/verification` | Mirror on-chain verification result |
+| GET/POST | `/tx-log` | List / record transaction-log events |
+
+> Auth routes (`/auth/*`) are public; all other routes require `MAINTCHAIN_API_KEY` (proxy-injected) and, except `/health*`, a valid wallet session cookie.
 
 #### 3.2.2 Key Backend Components
 
@@ -238,10 +263,17 @@ The attestation is the **terminal artifact** of the compliance workflow. It is a
 - `get_audit_trail` — Joins approvals and maintenance records to build a complete audit timeline
 - `approve_by_auditor` — Transition to Compliant, issue certificate
 
+**Auth Module** (`auth.rs`):
+- SEP-53 challenge-response — generates 32-byte nonces (stored in `challenge_nonces`), verifies Ed25519 signatures via `stellar-strkey`
+- Backend counterpart to the proxy's HMAC-signed session cookie; `identity_middleware` rejects requests whose body `stellar_address` doesn't match the authenticated session
+
 **Soroban Client** (`soroban_client.rs`):
-- Wraps Soroban RPC calls for contract verification and certificate issuance
-- Currently runs in "demo mode" — returns placeholder tx hashes when contract IDs are not configured
-- Designed for production upgrade: full Soroban transaction signing via deployer secret key
+- **Verify-only** RPC wrapper — simulates read-only contract calls (e.g. `MultiPartyApproval.verify`) and reads back on-chain state to sync the database
+- Uses the native Rust RPC transport (`soroban_rpc.rs`) — no Node.js subprocess, no signing, no deployer secret key
+- All state-changing transactions are signed by users' Freighter wallets via the frontend
+
+**Transaction Log** (`tx_log.rs`):
+- Mirrors frontend on-chain transaction status events into the `transaction_log` table
 
 **Storage Module** (`storage.rs`):
 - `compute_file_hash` — SHA-256 hashing of uploaded evidence files
@@ -254,6 +286,9 @@ The attestation is the **terminal artifact** of the compliance workflow. It is a
 - `maintenance_records` — Maintenance job state (id, equipment_id, technician_id, status, evidence_hash, created_at)
 - `approvals` — Approval events (id, maintenance_id, approver_id, role, decision, timestamp, note)
 - `users` — User registration for Stellar wallet linking (id, stellar_address, name, role, organization, created_at)
+- `challenge_nonces` — SEP-53 challenge messages (nonce, expires_at)
+- `user_verifications` — On-chain identity verification mirrors (wallet, role, organization, contract ID, version)
+- `transaction_log` — Frontend-mirrored on-chain transaction status events
 
 ### 3.3 Frontend (Presentation Layer)
 
@@ -278,6 +313,10 @@ The attestation is the **terminal artifact** of the compliance workflow. It is a
 | `/leaderboard` | Trust Rankings | Top workers, trust growth, evidence quality |
 | `/industries` | Industry Coverage | Industry-specific compliance info |
 | `/live-network` | Activity Feed | Real-time network events |
+| `/register` | User Registration | Wallet connect, SEP-53 challenge, role selection |
+| `/users` | User Directory | Registered users with search/filter |
+| `/feedback` | Feedback & Rating | 5-star ratings and category selection |
+| `/technical-preview` | Technical Preview | Phase 1 "What to Test" guide |
 
 #### 3.3.2 Key Frontend Components
 
@@ -367,8 +406,8 @@ All Approvals Complete → Auditor clicks "Issue Certificate"
     │       │
     │       ├──→ ComplianceAttestation.issue_certificate(
     │       │       approval_contract, records_contract, maintenance_id, cert_hash)
-    │       │   ├──→ [Cross-Contract] MultiPartyApproval.verify_compliance → check bitmap
-    │       │   └──→ [Cross-Contract] MaintenanceRecords.complete_record → Compliant
+    │       │       ├──→ [Cross-Contract] MultiPartyApproval.verify → check bitmap
+    │       │       └──→ [Cross-Contract] MaintenanceRecords.complete → Compliant
     │       │
     │       └──→ Attestation stored on-chain permanently
     │
@@ -433,10 +472,10 @@ All Approvals Complete → Auditor clicks "Issue Certificate"
 
 ### 6.3 Current Limitations
 
-- Backend SorobanClient runs in demo mode (no real Soroban signing)
-- No IPFS storage without Pinata credentials configured
-- Cross-contract invocation is scaffolded but not fully wired
-- API authentication is demo-grade (not enforced)
+- **Backend is verify-only** — the backend never signs or submits Soroban transactions; all state-changing operations originate from the user's Freighter wallet via the frontend. On-chain state is read back via native Rust RPC simulations (`soroban_rpc.rs`).
+- **No IPFS storage without Pinata credentials** — evidence files are hashed but not stored; a production deployment needs IPFS/S3 or equivalent.
+- **Cross-contract invocation is wired** — `ComplianceAttestation.issue_certificate` calls `MultiPartyApproval.verify` and `MaintenanceRecords.complete` via `env.invoke_contract`, covered by unit tests.
+- **Two-layer API auth is enforced** — the Next.js proxy injects `MAINTCHAIN_API_KEY` and validates an HMAC-signed session cookie; the backend enforces wallet-address ownership via `identity_middleware`. CORS is allow-listed via the `ALLOWED_ORIGINS` env var.
 
 ---
 

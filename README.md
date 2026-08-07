@@ -12,7 +12,6 @@ The project ships a full stack: **five Soroban contracts** (Rust, `no_std`, comp
 - [📘 Project Guide & Use Cases](./PROJECT_GUIDE.md) — Whitepaper: problem analysis, stakeholder analysis, industry scenarios, roadmap
 - [🏗️ System Architecture & Design](./SYSTEM_DESIGN.md) — Full design: data flow, security model, component deep-dives, trade-off analysis
 - [🔗 Stellar Integration & Contracts](./STELLAR_INTEGRATION.md) — Soroban contract deep-dives, SDK usage, deployment pipeline
-- [📐 Architecture Diagram (Interactive)](./SYSTEM_DESIGN_DIAGRAM.html) — Visual HTML system architecture diagram (open in browser)
 
 ---
 
@@ -171,11 +170,11 @@ Five independent Soroban crates, each compiled to WASM (`wasm32v1-none`):
 | **MaintenanceRecords** | Maintenance order state machine (Open -> Submitted -> PendingApproval -> Compliant/Rejected) | `create_record`, `submit_evidence`, `update_status`, `complete`, `set_authorized_completer`, `get_record` |
 | **MultiPartyApproval** | Approval bitmap (tech x supervisor x auditor). **Enforcement point** for compliance | `approve_by_technician`, `approve_by_supervisor`, `approve_by_auditor`, `reject_by_supervisor`, `verify`, `set_auditor_required` |
 | **ComplianceAttestation** | Final certificate issuance with cross-contract compliance check | `issue_certificate`, `get_attestation` |
-| **IdentityRegistry** | Identity verification per wallet (role, org, profile hash, version). **Entry point for Get Verified flow** | `verify_identity`, `is_verified`, `get_identity` |
+| **IdentityRegistry** | Identity verification per wallet (role, org, profile hash, version). **Entry point for Get Verified flow** | `verify_identity`, `is_verified`, `get_verification` |
 
 The **Get Verified** flow (`/get-verified`) walks users through a 7-stage identity verification: connect wallet → approve challenge → backend readiness check → create profile → compute SHA-256 identity hashes → sign `IdentityRegistry.verify_identity` transaction in Freighter → confirmation. Once verified, the user's role, organization, and profile hash are recorded on-chain, providing a portable identity that travels with their Stellar wallet across the platform.
 
-Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, and IdentityRegistry have snapshot-based test snapshots in their `test_snapshots/tests/` directories.
+Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, ComplianceAttestation, and IdentityRegistry have snapshot-based test snapshots in their `test_snapshots/tests/` directories.
 
 ---
 
@@ -192,13 +191,16 @@ Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, and Id
 |
 +-- backend/                      # Rust (Axum) REST API
 |   +-- Cargo.toml                # Dependencies: axum, sqlx (Postgres), soroban-sdk, sha2
-|   +-- migrations/               # SQL migrations (0001-0007)
+|   +-- migrations/               # SQL migrations (0001-0008)
 |   +-- src/
 |       +-- main.rs               # Router, handlers, CORS, DB pool
+|       +-- auth.rs               # SEP-53 challenge-response + HMAC session cookies
 |       +-- audit.rs              # Audit trail, auditor approval
 |       +-- complaint.rs          # Compliance transition logic
 |       +-- soroban_client.rs     # Native Rust Soroban RPC client (verify-only)
+|       +-- soroban_rpc.rs        # Native Soroban RPC transport (simulate, ScVal decode)
 |       +-- storage.rs            # File hashing + IPFS upload
+|       +-- tx_log.rs             # Transaction log endpoint (mirrors frontend tx status)
 |       +-- seed.rs               # Database seeder
 |       +-- seed_main.rs          # Binary entry point for seeding
 |
@@ -214,7 +216,7 @@ Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, and Id
 |   +-- package.json              # next 14.2, react 18, stellar-sdk 13, freighter-api 6
 |   +-- vercel.json               # Framework config (Next.js, build command)
 |   +-- src/
-|       +-- app/                  # Route pages (18 routes)
+|       +-- app/                  # Route pages (24 routes: 21 static + 3 dynamic)
 |       |   +-- page.tsx          # Landing page (Hero, TrustReplay, Stats)
 |       |   +-- dashboard/        # Worker dashboard with SVG metrics
 |       |   +-- upload/           # Evidence upload, drag-drop zone
@@ -233,14 +235,21 @@ Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, and Id
 |       |   +-- maintchain.ts     # Seed data (workers, machines, certificates)
 |       +-- hooks/
 |       |   +-- useSoroban.ts     # Freighter auth, balance, contract calls
+|       |   +-- useTransactionState.ts # On-chain tx lifecycle (idle/pending/success/timeout/failed)
 |       +-- lib/
 |           +-- api.ts            # Typed REST client
 |           +-- api-types.ts      # Request/response schemas
+|           +-- roles.ts          # Single source of truth for roles (drift-guarded by roles.test.ts + scripts/check-role-drift.mjs)
+|           +-- registration-error.ts # 409 duplicate-registration mapping
 |           +-- soroban.ts        # Contract invocation (simulate, sign, submit, poll)
+|           +-- tx-status-handler.ts # Shared on-chain failure handling
+|           +-- transaction-logger.ts # Mirrors tx status to backend /tx-log
 |
 +-- scripts/
 |   +-- deploy-contracts.mjs      # WASM upload + contract deploy to Soroban RPC
 |   +-- soroban-invoke.mjs        # Node.js helper for simulate-only contract calls
+|   +-- check-role-drift.mjs      # CI guard: roles.ts vs users_role_check constraint
+|   +-- check-contract-members.mjs # CI guard: workspace members ↔ crate dirs ↔ package names
 |   +-- test-setup.mjs            # Integration test scaffolding
 |
 +-- infra/
@@ -393,7 +402,7 @@ Both flows require the two-layer session: after connecting Freighter you must **
 4. Enter your **Full Name** (required)
 5. Select a **Role** — exactly one of the four DB-authorized values: `TECHNICIAN`, `SUPERVISOR`, `AUDITOR`, `OWNER`
 
-   > The backend `users_role_check` constraint accepts only these four uppercase values. Roles are centralized in `frontend/src/lib/roles.ts` and drift-guarded against the SQL migration by `roles.test.ts`.
+   > The backend `users_role_check` constraint accepts only these four uppercase values. Roles are centralized in `frontend/src/lib/roles.ts` and drift-guarded against the SQL migration by `roles.test.ts` plus the standalone `scripts/check-role-drift.mjs` CI check.
 
 6. Enter **Organization** (optional)
 7. Click **Register on MaintChain**
@@ -520,6 +529,10 @@ curl -X POST http://localhost:8081/hash/evidence \
 | `/users` | Registered user directory |
 | `/feedback` | Feedback collection with star ratings |
 | `/technical-preview` | Phase 1 "What to Test" guide for the six compliance stages |
+| `/docs` | Documentation placeholder page |
+| `/privacy` | Privacy policy placeholder page |
+| `/terms` | Terms of service placeholder page |
+| `/contact` | Contact placeholder page |
 
 ### Deploying Contracts
 
@@ -575,7 +588,7 @@ curl http://localhost:8081/health/config
 
 ```bash
 cd frontend
-npm run build                           # TypeScript type-check + production build (18 pages)
+npm run build                           # TypeScript type-check + production build (24 pages)
 npm run lint                            # ESLint
 ```
 
@@ -652,7 +665,7 @@ MaintChain integrates **Sentry** for error tracking:
 
 ### CI/CD
 
-- **CI** (`.github/workflows/ci.yml`): TypeScript lint + build, Rust check + build, contract tests + WASM build
+- **CI** (`.github/workflows/ci.yml`): TypeScript lint + test + build, Rust check + build, contract tests + WASM build, plus guards for migration placement/numbering, role-list drift, and contract workspace membership
 - **Deploy** (`.github/workflows/deploy.yml`): Vercel prebuilt flow on push to `main`; Render deploy hook for backend
 
 **Environment variables required in GitHub Secrets:**
@@ -690,7 +703,7 @@ MaintChain integrates **Sentry** for error tracking:
 
 ### Code Conventions
 
-- **Rust contracts**: `no_std`, Soroban SDK v21 patterns. Tests use `soroban_sdk::testutils`.
+- **Rust contracts**: `no_std`, Soroban SDK v26 patterns. Tests use `soroban_sdk::testutils`.
 - **Rust backend**: Axum handlers in separate modules. SQL queries inline (no ORM). Migrations in `backend/migrations/`.
 - **TypeScript frontend**: Next.js 14 App Router. Design system via CSS variables in `globals.css`. UI components in `src/components/maintchain/`.
 - **API**: RESTful plural nouns, POST for mutation, GET for reads. Structured error responses (`ApiErrorResponse`).

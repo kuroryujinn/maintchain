@@ -68,7 +68,7 @@ const signed = await signTransaction(txXDR, {
 |---------|---------|---------|
 | `soroban-sdk` | 21 | Soroban contract types and XDR parsing |
 | `stellar-xdr` | 21 | Stellar XDR serialization/deserialization |
-| `stellar-rpc-client` | 21 | Soroban RPC communication (not currently wired) |
+| `stellar-rpc-client` | 21 | Soroban RPC client (backend calls go through the native reqwest-based transport in `soroban_rpc.rs`) |
 
 ### 2.3 Horizon Integration
 
@@ -101,10 +101,10 @@ const result = await server.submitTransaction(signedTx);
 ```
 ComplianceAttestation
     │
-    ├── calls → MultiPartyApproval.verify_compliance()
+    ├── calls → MultiPartyApproval.verify()
     │             (cross-contract: "verify" symbol, 6 chars)
     │
-    └── calls → MaintenanceRecords.complete_record()
+    └── calls → MaintenanceRecords.complete()
                   (cross-contract: "complete" symbol, 8 chars)
 ```
 
@@ -128,17 +128,15 @@ This means the hash itself certifies the content — no external oracle needed.
 **Approval Bitmap:**
 MultiPartyApproval stores approvals as a boolean bitmap, enabling O(1) compliance verification:
 ```rust
-fn verify_compliance(env, maintenance_id) -> bool {
+fn verify(env, maintenance_id) -> bool {
     let state = load_approval_state(maintenance_id);
     state.tech_approved && state.supervisor_approved
         && (!state.auditor_required || state.auditor_approved)
 }
 ```
 
-**Symbol-Limited Cross-Contract Invocation:**
-Soroban SDK v21 restricts cross-contract function symbols to ≤9 characters. MaintChain adheres to this:
-- `"verify"` (6 chars) → MultiPartyApproval.verify_compliance
-- `"complete"` (8 chars) → MaintenanceRecords.complete_record
+**Short-Symbol Cross-Contract Invocation:**
+Contracts target Soroban SDK 26.1.0. Cross-contract calls use short `symbol_short!` names — `"verify"` and `"complete"` — which keeps WASM export names compact and sidesteps the export symbol-length limit that affected earlier SDK versions.
 
 ---
 
@@ -219,7 +217,9 @@ struct MaintenanceOrder {
   - Stores evidence hash and transitions to Submitted
 - `update_status(maintenance_id, new_status)`
   - General status transition (intended for cross-contract orchestration)
-- `complete_record(maintenance_id)`
+- `set_authorized_completer(authorized_address, caller)`
+  - Restricts which address may complete the record
+- `complete(maintenance_id, attestation_contract)`
   - Transitions from PendingApproval to Compliant
   - **Guard:** Only callable when status == PendingApproval
   - **Designed to be called by ComplianceAttestation**
@@ -256,12 +256,12 @@ struct ApprovalState {
   - Explicitly sets supervisor_approved = false
 - `approve_by_auditor(maintenance_id)`
   - Sets auditor_approved = true
-- `verify_compliance(maintenance_id) → bool`
+- `verify(maintenance_id) → bool`
   - Returns true ONLY if: tech_approved AND supervisor_approved AND (auditor_ok)
   - auditor_ok = auditor_approved IF auditor_required ELSE true
 
 **Why This Contract Is the Enforcement Point:**
-No off-chain logic can mark a record compliant without going through this contract. The `verify_compliance` function is the **single source of truth** for whether a maintenance record meets compliance requirements. Even if the database is compromised, the on-chain approval bitmap remains authoritative.
+No off-chain logic can mark a record compliant without going through this contract. The `verify` function is the **single source of truth** for whether a maintenance record meets compliance requirements. Even if the database is compromised, the on-chain approval bitmap remains authoritative.
 
 ### 4.4 ComplianceAttestation
 
@@ -282,14 +282,14 @@ struct Attestation {
 
 **Public Functions:**
 - `issue_certificate(approval_contract_id, records_contract_id, maintenance_id, cert_hash) → cert_hash`
-  1. Calls `MultiPartyApproval.verify_compliance(maintenance_id)` via cross-contract invocation
+  1. Calls `MultiPartyApproval.verify(maintenance_id)` via cross-contract invocation
   2. Panics if not eligible
   3. Stores attestation with current timestamp and contract address
-  4. Calls `MaintenanceRecords.complete_record(maintenance_id)` via cross-contract invocation
+  4. Calls `MaintenanceRecords.complete(maintenance_id, attestation_contract)` via cross-contract invocation
   5. Returns cert_hash
 - `get_attestation(maintenance_id) → Attestation`
 
-**Cross-Contract Invocation (v21 Soroban SDK):**
+**Cross-Contract Invocation (Soroban SDK 26.1.0):**
 ```rust
 let args: soroban_sdk::Vec<Val> = vec![&env, maintenance_id.into_val(&env)];
 let is_eligible: bool = env.invoke_contract(
@@ -299,7 +299,7 @@ let is_eligible: bool = env.invoke_contract(
 );
 ```
 
-Note: Cross-contract invocation is **scaffolded but has a known limitation** — the Soroban SDK v21 `symbol_short!` macro has specific length constraints that require matching symbol names across contracts. This is documented as an active work item.
+Note: Cross-contract invocation is **fully wired and covered by unit tests** (see `contracts/compliance-attestation/test_snapshots/`), including the full certification flow, ineligible-status rejection, and not-found handling.
 
 ---
 
@@ -324,7 +324,7 @@ The frontend implements a complete Soroban transaction lifecycle in `frontend/sr
 
 ### 5.2 Read-Only Simulations
 
-For `verify_compliance` and `get_equipment` (read-only operations), the frontend uses `simulateContract` which skips the signing and submission steps:
+For `verify` and `get_equipment` (read-only operations), the frontend uses `simulateContract` which skips the signing and submission steps:
 
 ```
 1. Build transaction with dummy source account
@@ -361,7 +361,7 @@ export function toBytesN32(str: string): string {
 
 | Route | Contract(s) Called | Method | Type |
 |-------|-------------------|--------|------|
-| `/dashboard` | MultiPartyApproval | `verify_compliance` | Simulate (read) |
+| `/dashboard` | MultiPartyApproval | `verify` | Simulate (read) |
 | `/upload` | MaintenanceRecords | `submit_evidence` | Invoke (write) |
 | `/approve` | MultiPartyApproval | `approve_by_supervisor` | Invoke (write) |
 | `/audit` | ComplianceAttestation | `issue_certificate` | Invoke (write) |
@@ -522,38 +522,27 @@ All other routes require both:
 
 ## 7. Backend → Contract Integration
 
-### 6.1 SorobanClient (`backend/src/soroban_client.rs`)
+### 7.1 SorobanClient (`backend/src/soroban_client.rs`)
 
-The backend includes a `SorobanClient` that wraps Soroban RPC calls. Currently in **demo mode** — returns placeholder transaction hashes when contract IDs are not configured.
+The backend includes a `SorobanClient` that wraps Soroban RPC calls. It is **verify-only by design** — the backend never signs or submits transactions; all state-changing operations originate from the user's Freighter wallet via the frontend.
 
-**Current implementation:**
+**Current implementation (native Rust RPC, no Node.js subprocess):**
 ```rust
 pub async fn verify_compliance(&self, maintenance_id_bytes: &[u8]) -> Result<bool, StatusCode> {
-    // Falls back to local database state as source of truth
-    // In production: build tx → simulate via RPC → parse boolean result
-    Ok(true)
-}
-
-pub async fn issue_certificate(&self, ...) -> Result<String, StatusCode> {
-    // Generates placeholder tx ID
-    // In production: build tx → simulate → sign with deployer key → submit → poll
-    Ok(format!("tx_soroban_{}", uuid::Uuid::new_v4()))
+    // Builds a minimal transaction envelope and POSTs to Soroban RPC
+    // /simulateTransaction via soroban_rpc::simulate_contract_call, then
+    // decodes the boolean return value with stellar-xdr (no fragile hex
+    // matching). Returns 424 FAILED_DEPENDENCY if APPROVAL_CONTRACT_ID is unset.
 }
 ```
 
-**Planned production upgrade:**
-1. Build Soroban transaction calling `ComplianceAttestation.issue_certificate`
-2. Simulate via Soroban RPC for footprint + resource fees
-3. Sign with deployer secret key (configured via `DEPLOYER_SECRET_KEY` env var)
-4. Submit to Soroban RPC
-5. Poll `getTransaction` for completion
-6. Return the real transaction hash
+The backend never generates placeholder hashes, and there is no `issue_certificate` on the backend — certificates are issued from the frontend through the user's wallet.
 
 ---
 
 ## 8. Contract Deployment Pipeline
 
-### 7.1 Deployment Script
+### 8.1 Deployment Script
 
 `scripts/deploy-contracts.mjs` automates WASM upload + contract deployment:
 
@@ -566,16 +555,19 @@ pub async fn issue_certificate(&self, ...) -> Result<String, StatusCode> {
 3. Generate .env.local entries with all contract IDs
 ```
 
-### 7.2 Deployed Contracts Summary
+### 8.2 Deployed Contracts Summary
 
-| Contract | Address | Deploy TX | Status |
-|----------|---------|-----------|--------|
-| EquipmentRegistry | `CAT57...WWEW` | `037c5...7863` | ✅ Testnet |
-| MaintenanceRecords | `CBRI...775Z` | `bb8e1...aae` | ✅ Testnet |
-| MultiPartyApproval | `CBPH...JOYH` | `f6378...ac53` | ✅ Testnet |
-| ComplianceAttestation | `CBR4...VIN` | `295cf...1ef` | ✅ Testnet |
+| Contract | Address | Status |
+|----------|---------|--------|
+| IdentityRegistry | `CA2CSUN5T4ZJZHQ562XFHB2WVSGE2E7KS4NJ2SBFJM6CLRZIFLJP4EMC` | ✅ Testnet |
+| MultiPartyApproval | `CDGJ6VX3TG4M66SBFS5LCBPTF26GEFRZXXAYNYAWYRYHG2WDJ7UYAZSC` | ✅ Testnet |
+| EquipmentRegistry | `CBTOLJE5FVYO4Y473OIZIBX3OAAZAKCRODZ4LI56Q5UYMQTXRUSVC2EO` | ✅ Testnet |
+| MaintenanceRecords | `CDZ324UZJCIKG32YKY4MFZX5AO63VXCK73NO5QS3QI3256UDBYR5LP6M` | ✅ Testnet |
+| ComplianceAttestation | `CDDMPFXM3DMXZBMKBQR4UBSOXB5XZIDLVAJGX3L7D4C6TTFXGKY7EGU2` | ✅ Testnet |
 
-### 7.3 Environment Variables
+> Re-deploying contracts changes these IDs — update `frontend/.env.local` and the backend env vars to match.
+
+### 8.3 Environment Variables
 
 ```env
 # Frontend (NEXT_PUBLIC_ prefix for client-side access)
@@ -585,19 +577,19 @@ NEXT_PUBLIC_MULTI_PARTY_APPROVAL_ID=CBPHZFRYKSE6PUWHU2HSNQTWBQ47GYV3U73KXPSOPIX3
 NEXT_PUBLIC_COMPLIANCE_ATTESTATION_ID=CBR4HHPWRDXMJJOG65B6I5TRIBBUFAXAMUCTAJANAPBAIJHPKRUTCVIN
 NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 
-# Backend (for backend-initiated contract calls)
+# Backend (verify-only — read simulations; no signing key required)
 APPROVAL_CONTRACT_ID=<same_as_above>
 RECORDS_CONTRACT_ID=<same_as_above>
 ATTESTATION_CONTRACT_ID=<same_as_above>
+IDENTITY_REGISTRY_CONTRACT_ID=<identity_registry_id>  # Used by /verification/readiness + user_verifications
 SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-DEPLOYER_SECRET_KEY=<testnet_secret_key>  # Required for full signing
 ```
 
 ---
 
 ## 9. Testing & Validation
 
-### 8.1 Contract Unit Tests
+### 9.1 Contract Unit Tests
 
 ```bash
 cd contracts
@@ -608,16 +600,13 @@ cargo test -p multi-party-approval  # MultiPartyApproval
 cargo test -p compliance-attestation # ComplianceAttestation
 ```
 
-### 8.2 Snapshot Tests
+### 9.2 Snapshot Tests
 
-EquipmentRegistry includes Soroban snapshot tests in `contracts/equipment-registry/test_snapshots/tests/`:
-- `test_register_equipment_stores_snapshot.1.json`
-- `test_get_equipment_returns_latest_version.1.json`
-- `test_update_owner_creates_new_version_snapshot.1.json`
+EquipmentRegistry, MultiPartyApproval, ComplianceAttestation, and IdentityRegistry include Soroban snapshot tests in their `test_snapshots/tests/` directories (e.g. `contracts/equipment-registry/test_snapshots/tests/test_register_equipment_stores_snapshot.1.json`).
 
 Snapshots capture the full ledger state after each test, enabling regression detection across Soroban SDK upgrades.
 
-### 8.3 Frontend Validation
+### 9.3 Frontend Validation
 
 ```bash
 cd frontend
@@ -625,7 +614,7 @@ npm run build    # TypeScript compilation + ESLint
 npm run lint     # Next.js linting
 ```
 
-The build generates 18 static pages. All contract interaction code is validated at build time through TypeScript's type system.
+The build generates 24 static pages. All contract interaction code is validated at build time through TypeScript's type system.
 
 ---
 
@@ -633,9 +622,8 @@ The build generates 18 static pages. All contract interaction code is validated 
 
 | Limitation | Impact | Target |
 |-----------|--------|--------|
-| Cross-contract invocation stubbed | Certificate issuance works but doesn't trigger on-chain status update | Q3 2026 |
-| Backend SorobanClient in demo mode | Backend-initiated contract calls use placeholder tx hashes | Q3 2026 |
-| No Soroban SDK v22 migration | v22 changed cross-contract API; upgrading required for latest features | Q4 2026 |
+| Backend is verify-only | Backend reads on-chain state via simulation but never signs; all writes come from user wallets (by design) | — |
+| Evidence files not stored | Only hashes are on-chain; production needs IPFS/S3 | Q3 2026 |
 | Single Soroban RPC endpoint | No fallback if endpoint is slow or unavailable | Q4 2026 |
 | No mainnet deployment | Contracts only on Testnet | Q1 2027 |
 

@@ -77,7 +77,7 @@ Fault Detected → Worker Accepts → Evidence Uploaded
 
 **Stage 4 — Evidence Verification:** The supervisor reviews the evidence against the work order. The evidence hash on-chain ensures the supervisor is reviewing exactly what the technician submitted — any alteration would produce a different hash.
 
-**Stage 5 — Multi-Party Approval:** The supervisor approves (or rejects) the work on-chain via `MultiPartyApproval.approve_by_supervisor`. If the configuration requires it, an auditor also signs off via `MultiPartyApproval.approve_by_auditor`. The contract's `verify_compliance` function returns `true` only when **all** required parties have approved.
+**Stage 5 — Multi-Party Approval:** The supervisor approves (or rejects) the work on-chain via `MultiPartyApproval.approve_by_supervisor`. If the configuration requires it, an auditor also signs off via `MultiPartyApproval.approve_by_auditor`. The contract's `verify` function returns `true` only when **all** required parties have approved.
 
 **Stage 6 — Certificate Generation:** Once compliance is verified, the `ComplianceAttestation` contract issues a final certificate containing the issuer address, cert hash, and timestamp. The certificate is permanently stored on-chain and visible to any party.
 
@@ -176,7 +176,7 @@ External parties who need to verify compliance without relying on any single org
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Blockchain** | Stellar Soroban (Testnet) | Smart contract execution & on-chain state |
-| **Smart Contracts** | Rust (`no_std`, wasm32v1-none) | 4 independent contract crates |
+| **Smart Contracts** | Rust (`no_std`, wasm32v1-none) | 5 independent contract crates |
 | **Backend** | Rust (Axum) | REST API, Postgres, evidence hashing |
 | **Database** | PostgreSQL 16 (Supabase) | Off-chain records, user data, audit logs |
 | **Frontend** | Next.js 14 (App Router) | Web application, Freighter integration |
@@ -191,9 +191,9 @@ External parties who need to verify compliance without relying on any single org
 ## 8. Current Status & Roadmap
 
 ### 8.1 Completed
-- ✅ 4 Soroban smart contracts deployed on Stellar Testnet
+- ✅ 5 Soroban smart contracts deployed on Stellar Testnet (incl. IdentityRegistry)
 - ✅ Axum REST backend with Postgres (equipment CRUD, maintenance orders, approvals, audit)
-- ✅ Next.js 14 frontend with 14+ routes (landing, dashboard, upload, approve, audit, workers, etc.)
+- ✅ Next.js 14 frontend with 20+ routes (landing, dashboard, upload, approve, audit, register, get-verified, users, etc.)
 - ✅ Wallet integration (Freighter connect/disconnect, balance, XLM transfer, contract calls)
 - ✅ Soroban contract invocation pipeline (simulate → sign → submit → poll)
 - ✅ Evidence hashing (SHA-256) and IPFS upload (Pinata)
@@ -210,9 +210,9 @@ External parties who need to verify compliance without relying on any single org
 - ✅ **20+ meaningful commits** achieved (Level 5 requirement)
 
 ### 8.2 In Progress
-- 🔄 Cross-contract invocation wiring (ComplianceAttestation → MaintenanceRecords)
-- 🔄 Full Soroban RPC signing flow from backend (currently uses demo mode)
-- 🔄 CI/CD pipeline automation
+- ✅ Cross-contract invocation wired — `ComplianceAttestation.issue_certificate` → `MultiPartyApproval.verify` → `MaintenanceRecords.complete` (covered by unit tests)
+- ✅ Backend Soroban integration upgraded to a native Rust RPC client — **verify-only by design**: the backend simulates read-only calls and never signs; users sign all transactions via Freighter
+- ✅ CI/CD pipeline automation (GitHub Actions: CI on push/PR + Vercel/Render deploy on main)
 - 🔄 User onboarding (target: 50+ testnet users)
 - 🔄 Pitch deck / PPT creation
 - 🔄 Demo video walkthrough recording
@@ -220,7 +220,7 @@ External parties who need to verify compliance without relying on any single org
 ### 8.3 Roadmap
 | Quarter | Milestone |
 |---------|-----------|
-| Q3 2026 | Cross-contract invocation wired; full Soroban signing from backend; 50+ user onboarding |
+| Q3 2026 | 50+ user onboarding; production evidence storage (IPFS/S3) |
 | Q4 2026 | IPFS/Arweave production storage; certificate verification portal; mobile app alpha |
 | Q1 2027 | Mobile app (React Native); Stellar mainnet deployment |
 | Q2 2027 | Enterprise SSO, custom audit rules engine, API marketplace |
@@ -252,7 +252,7 @@ Based on the initial round of user testing and feedback collection, here is the 
 
 ## 9. Conclusion
 
-MaintChain addresses a real, costly problem — industrial maintenance record fraud — with a technically sound solution: multi-party cryptographic approval on Stellar Soroban. The system is live on Testnet with all four smart contracts deployed, a production-grade frontend, and a REST backend.
+MaintChain addresses a real, costly problem — industrial maintenance record fraud — with a technically sound solution: multi-party cryptographic approval on Stellar Soroban. The system is live on Testnet with all five smart contracts deployed (EquipmentRegistry, MaintenanceRecords, MultiPartyApproval, ComplianceAttestation, IdentityRegistry), a production-grade frontend, and a REST backend.
 
 The project demonstrates that **decentralized compliance is not just technically feasible — it's economically rational**. By making falsification provably expensive and honest work provably verifiable, MaintChain creates alignment between individual incentives and system-wide integrity.
 

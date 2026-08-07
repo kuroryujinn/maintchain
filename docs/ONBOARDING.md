@@ -101,10 +101,6 @@ Once registered, try these paths based on your role:
 6. Drag and drop any file (photo, screenshot, PDF)
 7. Click **Submit Evidence**
 8. ✅ You've submitted evidence to the blockchain!
-4. Enter a maintenance record UUID (e.g., `11111111-1111-1111-1111-111111111101` — you'll need a matching record in the backend)
-5. Drag and drop any file (photo, screenshot, PDF)
-6. Click **Submit Evidence**
-7. ✅ You've submitted evidence to the blockchain!
 
 ### 👔 Supervisor Flow
 

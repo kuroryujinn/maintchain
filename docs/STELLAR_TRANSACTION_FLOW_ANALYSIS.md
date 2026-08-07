@@ -6,6 +6,19 @@
 
 ---
 
+> ## ⚠️ Status update (August 7, 2026)
+>
+> This document is a **point-in-time analysis from July 23, 2026**. It does **not** describe the current codebase — much of it was superseded by fixes made July 24–30. Treat §2 (Contract Analysis), §3.2, §3.4–§3.6, §4, §5, §6–§9 as **history only** (e.g. §2/§5 still use the old `verify_compliance`/`complete_record` function names — the contracts now export `verify`/`complete`); for current state see [README.md](../README.md), [STELLAR_INTEGRATION.md](../STELLAR_INTEGRATION.md), and [ARCHITECTURE_COMPLETE.md](./ARCHITECTURE_COMPLETE.md).
+>
+> Key changes since this analysis:
+> - **Backend SorobanClient is no longer stubbed.** It is verify-only by design: real on-chain simulations via a native Rust RPC client (`soroban_rpc.rs`); no Node.js subprocess, no placeholder tx hashes, and no `issue_certificate()` on the backend (auditors sign in Freighter; the backend verifies the submitted tx hash).
+> - **On-chain failures are surfaced to users** — `TxStatus`/`useTransactionState` drive `TransactionProgress`; no more silent `console.warn` best-effort pattern.
+> - **Two-layer auth is enforced** — `MAINTCHAIN_API_KEY` middleware + SEP-53 wallet session (`X-User-Address` + `identity_middleware`); CORS is allow-listed via `ALLOWED_ORIGINS`.
+> - **Contracts now authorize callers** (`caller.require_auth()` everywhere); **5 contracts** are deployed (IdentityRegistry added); contracts target **Soroban SDK 26.1.0**; cross-contract `verify`/`complete` calls are wired and unit-tested.
+> - **Contract IDs changed** with the latest deployment — see the "Current Testnet deployments" table in README.md.
+
+---
+
 ## 1. Architecture Overview
 
 ### 1.1 Layer Diagram
