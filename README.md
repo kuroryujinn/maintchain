@@ -250,6 +250,7 @@ Each contract includes unit tests. EquipmentRegistry, MultiPartyApproval, Compli
 |   +-- soroban-invoke.mjs        # Node.js helper for simulate-only contract calls
 |   +-- check-role-drift.mjs      # CI guard: roles.ts vs users_role_check constraint
 |   +-- check-contract-members.mjs # CI guard: workspace members ↔ crate dirs ↔ package names
+|   +-- check-deploy-contracts.mjs # CI guard: deploy script wasm refs ↔ workspace crates
 |   +-- test-setup.mjs            # Integration test scaffolding
 |
 +-- infra/
@@ -665,7 +666,7 @@ MaintChain integrates **Sentry** for error tracking:
 
 ### CI/CD
 
-- **CI** (`.github/workflows/ci.yml`): TypeScript lint + test + build, Rust check + build, contract tests + WASM build, plus guards for migration placement/numbering, role-list drift, and contract workspace membership
+- **CI** (`.github/workflows/ci.yml`): TypeScript lint + test + build, Rust check + build, contract tests + WASM build, plus guards for migration placement/numbering, role-list drift, contract workspace membership, and deploy-script ↔ workspace references
 - **Deploy** (`.github/workflows/deploy.yml`): Vercel prebuilt flow on push to `main`; Render deploy hook for backend
 
 **Environment variables required in GitHub Secrets:**

@@ -150,6 +150,13 @@ jobs:
       - name: Check workspace members match contract directories
         run: node ../scripts/check-contract-members.mjs
 
+      # Deploy guard: every *.wasm reference in scripts/deploy-contracts.mjs must
+      # map to a workspace crate, and every workspace crate must be deployed —
+      # otherwise a renamed crate silently deploys stale WASM, and a new crate
+      # is never deployed at all.
+      - name: Check deploy-contracts.mjs references match workspace crates
+        run: node ../scripts/check-deploy-contracts.mjs
+
       - name: Setup Rust nightly toolchain
         uses: dtolnay/rust-toolchain@master
         with:
