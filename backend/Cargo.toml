@@ -39,7 +39,7 @@ base64 = "0.22"
 hmac = "0.12"
 rand = "0.8"
 
-# Monitoring & error tracking (Sentry)
+# Monitoring & error tracking (GlitchTip — Sentry-compatible SDK)
 sentry = "0.48"
 sentry-tower = "0.48"
 

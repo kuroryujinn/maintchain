@@ -33,13 +33,19 @@ use axum::http::{HeaderValue, Method};
 
 use tracing::{error, info, warn};
 
-// ─── Sentry / Error Tracking ─────────────────────────────────────
+// ─── GlitchTip / Error Tracking ────────────────────────────────────
+// GlitchTip is Sentry-compatible — uses the same sentry Rust SDK.
+// Reference: https://glitchtip.com/sdkdocs/node/
 use sentry_tower::NewSentryLayer;
 
-/// Initialize Sentry error tracking for the backend.
-/// Reads SENTRY_DSN from the environment. If unset, Sentry is a no-op.
+/// Initialize GlitchTip error tracking for the backend.
+/// Reads GLITCHTIP_DSN or SENTRY_DSN from the environment. If unset, monitoring is a no-op.
+/// Initialization is fail-safe: if the DSN is invalid, the application continues.
 fn init_sentry() -> Option<sentry::ClientInitGuard> {
-    let dsn = std::env::var("SENTRY_DSN").ok()?;
+    // Support both GlitchTip and legacy Sentry DSN env vars during migration
+    let dsn = std::env::var("GLITCHTIP_DSN")
+        .or_else(|_| std::env::var("SENTRY_DSN"))
+        .ok()?;
     if dsn.trim().is_empty() {
         return None;
     }
@@ -48,15 +54,17 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
         sentry::ClientOptions {
             release: sentry::release_name!(),
             environment: Some(
-                std::env::var("SENTRY_ENVIRONMENT")
+                std::env::var("GLITCHTIP_ENVIRONMENT")
+                    .or_else(|_| std::env::var("SENTRY_ENVIRONMENT"))
                     .unwrap_or_else(|_| "production".to_string())
                     .into(),
             ),
-            traces_sample_rate: 0.1,
+            // GlitchTip recommends low sample rates in production
+            traces_sample_rate: 0.01,
             ..Default::default()
         },
     ));
-    info!("Sentry error tracking initialized");
+    info!("GlitchTip error tracking initialized");
     Some(guard)
 }
 
@@ -1120,8 +1128,8 @@ async fn main() -> anyhow::Result<()> {
 
     dotenvy::dotenv().ok();
 
-    // ── SENTRY INIT ──
-    // Initialize Sentry error tracking (no-op if SENTRY_DSN is unset)
+    // ── GLITCHTIP INIT ──
+    // Initialize GlitchTip error tracking (no-op if GLITCHTIP_DSN/SENTRY_DSN is unset)
     // The guard must be kept alive for the duration of the program.
     let _sentry_guard = init_sentry();
 
@@ -1280,7 +1288,8 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
-        // Sentry middleware — captures performance data and errors for all requests
+        // GlitchTip middleware — captures performance data and errors for all requests
+        // (uses sentry-tower which is compatible with GlitchTip)
         .layer(NewSentryLayer::new_from_top())
         .layer(cors)
         .with_state(state);
