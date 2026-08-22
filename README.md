@@ -312,6 +312,7 @@ Starts Postgres 16 on port 5432 (user/password/database: `maintchain`).
 ```bash
 cd backend
 export DATABASE_URL="postgres://maintchain:maintchain@localhost:5432/maintchain"
+export GLITCHTIP_DSN="https://d50984aebbe547c1af84ff919ccedb62@app.glitchtip.com/27052"
 cargo run
 ```
 
@@ -348,6 +349,9 @@ Create `frontend/.env.local`:
 ```env
 NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 NEXT_PUBLIC_API_URL=http://localhost:8081
+
+# Error tracking (GlitchTip — optional in dev)
+NEXT_PUBLIC_GLITCHTIP_DSN=https://d50984aebbe547c1af84ff919ccedb62@app.glitchtip.com/27052
 ```
 
 Optional — after deploying contracts:
@@ -645,10 +649,20 @@ All landing page components pass visual inspection with zero console errors (ver
 
 ### Monitoring
 
-MaintChain integrates **Sentry** for error tracking:
-- **Frontend**: `@sentry/nextjs` -- JS errors, unhandled rejections, performance. Session replay (10% sampled, 100% on error).
-- **Backend**: sentry + sentry-tower -- server errors, request performance. Configurable via `SENTRY_DSN`.
-- **User Feedback**: Floating widget (`FeedbackButton`) submits context-rich feedback to Sentry.
+MaintChain integrates **GlitchTip** for error tracking (Sentry-compatible SDK):
+- **Frontend**: `@sentry/nextjs` -- JS errors, unhandled rejections, performance (1% sample rate).
+- **Backend**: sentry + sentry-tower -- server errors, request performance. Configurable via `GLITCHTIP_DSN`.
+- **User Feedback**: Floating widget (`FeedbackButton`) submits context-rich feedback to GlitchTip.
+- **Source Maps**: Uploaded via GlitchTip CLI in CI/CD for readable production stack traces.
+
+### Community Feedback & Testing
+
+MaintChain is currently in its Technical Preview phase. Users are encouraged to test the platform, submit feedback, and help validate the compliance workflow.
+
+[Submit Feedback](https://forms.gle/fo1wwygKWCd1TuXw9) · [View Responses](https://docs.google.com/spreadsheets/d/1lUUscN6XLueZiq5D9E4bB--CUR9ZRT0xjNcD2pyZK6Q/edit?usp=sharing)
+
+- **Google Form** — Submit feedback on registration, wallet connection, identity verification, maintenance workflows, and overall UX.
+- **Google Sheet** — Browse collected responses from testers and community participants.
 
 ---
 
@@ -662,7 +676,7 @@ MaintChain integrates **Sentry** for error tracking:
 | Backend | Render | Docker container (see Dockerfile, render.yaml) |
 | Database | Supabase | PostgreSQL 16 via connection pooler |
 | Smart Contracts | Stellar Testnet | 5 Soroban contracts (addresses above) |
-| Error Tracking | Sentry | Frontend + backend |
+| Error Tracking | GlitchTip | Frontend + backend (Sentry-compatible SDK) |
 
 ### CI/CD
 
@@ -677,6 +691,7 @@ MaintChain integrates **Sentry** for error tracking:
 | `VERCEL_ORG_ID` | Frontend deploy |
 | `VERCEL_PROJECT_ID` | Frontend deploy |
 | `RENDER_DEPLOY_HOOK_URL` | Backend deploy (optional) |
+| `GLITCHTIP_AUTH_TOKEN` | GlitchTip source map upload (optional) |
 
 ---
 
