@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" font-family="Inter, sans-serif">
+  <defs>
+    <linearGradient id="stageGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1000" height="300" fill="#f8fafc" rx="16"/>
+  <text x="500" y="35" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">Compliance Flow — 6 Stages</text>
+
+  <!-- Stage boxes -->
+  <rect x="20" y="60" width="140" height="80" rx="10" fill="url(#stageGrad)"/>
+  <text x="90" y="90" text-anchor="middle" font-size="11" font-weight="600" fill="white">01 · Detection</text>
+  <text x="90" y="110" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.8)">Fault flagged</text>
+
+  <rect x="180" y="60" width="140" height="80" rx="10" fill="url(#stageGrad)"/>
+  <text x="250" y="90" text-anchor="middle" font-size="11" font-weight="600" fill="white">02 · Assignment</text>
+  <text x="250" y="110" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.8)">Tech accepts on-chain</text>
+
+  <rect x="340" y="60" width="140" height="80" rx="10" fill="url(#stageGrad)"/>
+  <text x="410" y="90" text-anchor="middle" font-size="11" font-weight="600" fill="white">03 · Evidence</text>
+  <text x="410" y="110" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.8)">SHA-256 on-chain</text>
+
+  <rect x="500" y="60" width="140" height="80" rx="10" fill="url(#stageGrad)"/>
+  <text x="570" y="90" text-anchor="middle" font-size="11" font-weight="600" fill="white">04 · Verification</text>
+  <text x="570" y="110" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.8)">Supervisor reviews</text>
+
+  <rect x="660" y="60" width="140" height="80" rx="10" fill="url(#stageGrad)"/>
+  <text x="730" y="90" text-anchor="middle" font-size="11" font-weight="600" fill="white">05 · Approval</text>
+  <text x="730" y="110" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.8)">Multi-party signs</text>
+
+  <rect x="820" y="60" width="160" height="80" rx="10" fill="#16a34a"/>
+  <text x="900" y="90" text-anchor="middle" font-size="11" font-weight="600" fill="white">06 · Certificate</text>
+  <text x="900" y="110" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.8)">On-chain attestation</text>
+
+  <!-- Arrows -->
+  <line x1="160" y1="100" x2="180" y2="100" stroke="#94a3b8" stroke-width="2"/>
+  <polygon points="180,100 172,95 172,105" fill="#94a3b8"/>
+
+  <line x1="320" y1="100" x2="340" y2="100" stroke="#94a3b8" stroke-width="2"/>
+  <polygon points="340,100 332,95 332,105" fill="#94a3b8"/>
+
+  <line x1="480" y1="100" x2="500" y2="100" stroke="#94a3b8" stroke-width="2"/>
+  <polygon points="500,100 492,95 492,105" fill="#94a3b8"/>
+
+  <line x1="640" y1="100" x2="660" y2="100" stroke="#94a3b8" stroke-width="2"/>
+  <polygon points="660,100 652,95 652,105" fill="#94a3b8"/>
+
+  <line x1="800" y1="100" x2="820" y2="100" stroke="#94a3b8" stroke-width="2"/>
+  <polygon points="820,100 812,95 812,105" fill="#94a3b8"/>
+
+  <!-- On-chain labels -->
+  <text x="250" y="165" text-anchor="middle" font-size="9" fill="#16a34a">On-chain: MaintenanceRecords</text>
+  <text x="410" y="165" text-anchor="middle" font-size="9" fill="#16a34a">On-chain: submit_evidence</text>
+  <text x="730" y="165" text-anchor="middle" font-size="9" fill="#16a34a">On-chain: MultiPartyApproval</text>
+  <text x="900" y="165" text-anchor="middle" font-size="9" fill="#16a34a">On-chain: ComplianceAttestation</text>
+
+  <!-- Footer note -->
+  <text x="500" y="220" text-anchor="middle" font-size="11" fill="#64748b">Each stage involves an on-chain Soroban transaction signed via Freighter wallet</text>
+  <text x="500" y="240" text-anchor="middle" font-size="11" fill="#64748b">Evidence files remain off-chain; only SHA-256 hashes are stored on Stellar</text>
+</svg>

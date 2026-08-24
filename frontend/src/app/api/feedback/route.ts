@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
 
-    // Capture to Sentry for error tracking / feedback aggregation
+    // Capture to GlitchTip for error tracking / feedback aggregation
     try {
       Sentry.captureMessage('User Feedback', {
         level: 'info',
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch {
-      // Sentry is optional
+      // GlitchTip is optional
     }
 
     return NextResponse.json({

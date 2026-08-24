@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MaintChain — Pitch Deck</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, sans-serif; background: #0f172a; color: #f8fafc; }
+    .slide { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 80px; }
+    .slide:nth-child(even) { background: #1e293b; }
+    h1 { font-size: 56px; font-weight: 800; line-height: 1.1; margin-bottom: 24px; }
+    h2 { font-size: 40px; font-weight: 700; line-height: 1.2; margin-bottom: 16px; color: #60a5fa; }
+    h3 { font-size: 24px; font-weight: 600; margin-bottom: 12px; }
+    p { font-size: 20px; line-height: 1.6; color: #cbd5e1; max-width: 700px; }
+    .highlight { color: #3b82f6; }
+    .stat { font-size: 64px; font-weight: 800; color: #3b82f6; }
+    .stat-label { font-size: 16px; color: #94a3b8; margin-top: 8px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 40px; }
+    .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 32px; }
+    .tag { display: inline-block; background: rgba(59,130,246,0.2); color: #60a5fa; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
+    ul { list-style: none; padding: 0; }
+    li { padding: 8px 0; font-size: 18px; color: #cbd5e1; }
+    li::before { content: "→ "; color: #3b82f6; font-weight: 600; }
+    .logo { font-size: 14px; color: #64748b; margin-bottom: 32px; letter-spacing: 0.1em; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+
+  <!-- Slide 1: Title -->
+  <div class="slide">
+    <div class="logo">MaintChain</div>
+    <h1>Every repair,<br><span class="highlight">provably tamper-proof.</span></h1>
+    <p>A multi-party compliance platform for industrial maintenance records, powered by Stellar Soroban smart contracts.</p>
+  </div>
+
+  <!-- Slide 2: Problem -->
+  <div class="slide">
+    <h2>The Problem</h2>
+    <h3>Industrial maintenance records cost industries <span class="highlight">$10B+/year</span> in fraud</h3>
+    <div class="grid">
+      <div class="card">
+        <h3>Mutability</h3>
+        <p>Paper logs and spreadsheets can be altered after the fact. No trusted historical record.</p>
+      </div>
+      <div class="card">
+        <h3>Single-Party Trust</h3>
+        <p>One person's approval is rarely audited. Single point of failure in compliance chains.</p>
+      </div>
+      <div class="card">
+        <h3>Siloed Reputation</h3>
+        <p>A technician's work history doesn't travel. Every employer starts from zero trust.</p>
+      </div>
+      <div class="card">
+        <h3>Expensive Audits</h3>
+        <p>Verifying repair history requires chasing siloed records across organizations.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 3: Solution -->
+  <div class="slide">
+    <h2>The Solution</h2>
+    <h3>Multi-party cryptographic approval on Stellar</h3>
+    <p>To fake a single record, an attacker would need to compromise 3 independent keys, fabricate evidence hashes, and create false equipment lineage. The cost of collusion exceeds any plausible benefit.</p>
+    <div style="margin-top: 40px;">
+      <div class="tag">6-Stage Compliance Flow</div>
+      <p style="margin-top: 16px;">Detection → Assignment → Evidence → Verification → Approval → Certificate</p>
+      <p style="margin-top: 8px; font-size: 16px; color: #94a3b8;">Every step is permanently recorded on the Stellar blockchain.</p>
+    </div>
+  </div>
+
+  <!-- Slide 4: Traction -->
+  <div class="slide">
+    <h2>Traction</h2>
+    <div class="grid" style="grid-template-columns: 1fr 1fr 1fr;">
+      <div style="text-align: center;">
+        <div class="stat">5</div>
+        <div class="stat-label">Smart Contracts Deployed</div>
+      </div>
+      <div style="text-align: center;">
+        <div class="stat">50</div>
+        <div class="stat-label">Testnet Users Verified</div>
+      </div>
+      <div style="text-align: center;">
+        <div class="stat">25</div>
+        <div class="stat-label">Frontend Routes</div>
+      </div>
+    </div>
+    <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; margin-top: 24px;">
+      <div style="text-align: center;">
+        <div class="stat">25+</div>
+        <div class="stat-label">API Endpoints</div>
+      </div>
+      <div style="text-align: center;">
+        <div class="stat">100%</div>
+        <div class="stat-label">On-Chain Approval Flow</div>
+      </div>
+      <div style="text-align: center;">
+        <div class="stat">A+</div>
+        <div class="stat-label">Error Tracking (GlitchTip)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 5: Tech Stack -->
+  <div class="slide">
+    <h2>Tech Stack</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="tag">Blockchain</div>
+        <h3>Stellar Soroban</h3>
+        <p>5 Rust smart contracts compiled to WASM. Low fees, fast finality.</p>
+      </div>
+      <div class="card">
+        <div class="tag">Backend</div>
+        <h3>Rust Axum + PostgreSQL</h3>
+        <p>25+ REST endpoints, SEP-53 auth, verify-only Soroban RPC client.</p>
+      </div>
+      <div class="card">
+        <div class="tag">Frontend</div>
+        <h3>Next.js 14 + Tailwind v4</h3>
+        <p>25 routes, Freighter wallet integration, Editorial + Glass design system.</p>
+      </div>
+      <div class="card">
+        <div class="tag">Infrastructure</div>
+        <h3>Vercel + Render + Supabase</h3>
+        <p>CI/CD via GitHub Actions, Docker backend, GlitchTip monitoring.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 6: Roadmap -->
+  <div class="slide">
+    <h2>Roadmap</h2>
+    <div class="grid" style="grid-template-columns: 1fr 1fr 1fr;">
+      <div class="card">
+        <div class="tag">Q3 2026</div>
+        <h3>Launch</h3>
+        <ul>
+          <li>50+ testnet users</li>
+          <li>IPFS evidence storage</li>
+          <li>Production deployment</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="tag">Q4 2026</div>
+        <h3>Scale</h3>
+        <ul>
+          <li>Certificate verification portal</li>
+          <li>Mobile app alpha</li>
+          <li>Enterprise integrations</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="tag">2027</div>
+        <h3>Mainnet</h3>
+        <ul>
+          <li>Stellar mainnet deployment</li>
+          <li>React Native mobile app</li>
+          <li>API marketplace</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 7: CTA -->
+  <div class="slide" style="text-align: center;">
+    <h1>Ready to build<br><span class="highlight">trust that travels?</span></h1>
+    <p style="margin: 24px auto; text-align: center;">MaintChain — where every repair is provable, every approval is permanent, and every certificate survives audits.</p>
+    <div style="margin-top: 40px;">
+      <span class="tag">maintchain.vercel.app</span>
+    </div>
+  </div>
+
+</body>
+</html>

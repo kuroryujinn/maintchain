@@ -1,9 +1,11 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import FadeInView from '@/components/maintchain/FadeInView';
 import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/maintchain/ui';
 import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
+import { captureTransactionEvent } from '@/lib/glitchtip';
+import { trackUploadPageEntered, trackEvidenceFileSelected, trackEvidenceSubmitInitiated, trackEvidenceSubmitted, trackEvidenceSubmitFailed } from '@/lib/analytics';
 import { AlertCircle, CheckCircle2, Upload } from 'lucide-react';
 import { toBytesN32, pollTransactionStatus } from '@/lib/soroban';
 import { handleContractStatus } from '@/lib/tx-status-handler';
@@ -17,6 +19,11 @@ export default function EvidenceUpload() {
   const { address, connectWallet, isConnected, callContract } = useSoroban();
   const [file, setFile] = useState<File | null>(null);
   const [maintenanceId, setMaintenanceId] = useState('');
+
+  // Track page entry
+  useEffect(() => {
+    trackUploadPageEntered();
+  }, []);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -107,6 +114,7 @@ export default function EvidenceUpload() {
     setUploadResult(null);
     setUploadError(null);
     timeoutContextRef.current = null;
+    trackEvidenceSubmitInitiated();
 
     try {
       txStateMachine.reset();
@@ -143,6 +151,8 @@ export default function EvidenceUpload() {
         );
 
         txStateMachine.transition(TxState.CONFIRMED, { hash: txResult.transactionHash });
+        captureTransactionEvent('transaction_confirmation', { network: 'testnet', contractType: 'MaintenanceRecords', contractId: MAINTENANCE_RECORDS_ID, method: 'submit_evidence', status: 'confirmed', transactionHash: txResult.transactionHash });
+        trackEvidenceSubmitted();
         onChainTx = txResult.transactionHash;
       }
 
@@ -161,7 +171,9 @@ export default function EvidenceUpload() {
       const message = error instanceof ApiError ? `${error.code}: ${error.message}` : 'Upload failed';
       const isTimeout = (error as { isTxTimeout?: boolean })?.isTxTimeout === true;
       if (!isTimeout) {
+        captureTransactionEvent('transaction_failure', { network: 'testnet', contractType: 'MaintenanceRecords', contractId: MAINTENANCE_RECORDS_ID, method: 'submit_evidence', error: message });
         txStateMachine.setError(TxState.RPC_ERROR, message);
+        trackEvidenceSubmitFailed({ error: message });
         setUploadError(message);
       }
     } finally {

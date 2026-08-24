@@ -27,6 +27,8 @@ export default function GlobalError({
   useEffect(() => {
     Sentry.withScope((scope) => {
       scope.setTag('error-boundary', 'global');
+      scope.setTag('error_category', 'react');
+      scope.setTag('application', 'maintchain');
       scope.setExtra('digest', error.digest ?? '');
       Sentry.captureException(error);
     });

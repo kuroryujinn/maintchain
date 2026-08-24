@@ -47,4 +47,15 @@ frontend/nul
 /nul
 .vercel
 .env*
+!.env.example
 .worktrees/
+
+# Synthetic user test harness (STRICT — secrets + state)
+scripts/synthetic-users/.tmp/
+scripts/synthetic-users/.tmp/**
+*.secret
+*.key
+
+# Production smoke test secrets
+.env.smoke
+smoke-report.json

@@ -1,0 +1,86 @@
+# MaintChain Production Smoke Test
+# Manual or scheduled production verification.
+#
+# This workflow runs the smoke test suite against the deployed production application.
+# It does NOT deploy or modify the production environment.
+#
+# Usage:
+#   1. Manual: Actions → Production Smoke Test → Run workflow
+#   2. Scheduled: Weekly on Sundays at 06:00 UTC
+#   3. After deployment: Trigger manually
+
+name: Production Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Production URL to test'
+        required: false
+        default: 'https://maintchain.vercel.app'
+      enable_blockchain:
+        description: 'Enable blockchain write tests (testnet only)'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Weekly on Sundays at 06:00 UTC
+    - cron: '0 6 * * 0'
+
+jobs:
+  smoke-test:
+    name: Production Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Run smoke tests
+        env:
+          SMOKE_BASE_URL: ${{ inputs.base_url || 'https://maintchain.vercel.app' }}
+          SMOKE_ENVIRONMENT: production
+          SMOKE_NETWORK: testnet
+          SMOKE_TIMEOUT: '30000'
+          SMOKE_ENABLE_BLOCKCHAIN: ${{ inputs.enable_blockchain || 'false' }}
+          SMOKE_ENABLE_ANALYTICS: 'true'
+          SMOKE_ENABLE_TELEMETRY: 'true'
+        run: node tests/smoke/smoke-runner.mjs
+
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report-${{ github.run_id }}
+          path: tests/smoke/smoke-report.json
+          retention-days: 30
+
+      - name: Report result
+        if: always()
+        run: |
+          if [ -f tests/smoke/smoke-report.json ]; then
+            echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat tests/smoke/smoke-report.json | node -e "
+              const fs = require('fs');
+              const data = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
+              console.log('| Metric | Value |');
+              console.log('|--------|-------|');
+              console.log('| Run ID | ' + data.runId + ' |');
+              console.log('| Target | ' + data.baseUrl + ' |');
+              console.log('| Duration | ' + data.duration + 'ms |');
+              console.log('| Passed | ' + data.summary.passed + ' |');
+              console.log('| Failed | ' + data.summary.failed + ' |');
+              console.log('| Skipped | ' + data.summary.skipped + ' |');
+              console.log('| Blocked | ' + data.summary.blocked + ' |');
+              console.log('| Result | **' + data.finalResult + '** |');
+            " >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,19 +1,52 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useSoroban } from '@/hooks/useSoroban';
 import Hero from '@/components/maintchain/landing/Hero';
-import TrustReplaySignature from '@/components/maintchain/landing/TrustReplaySignature';
-import StatGrid from '@/components/maintchain/landing/StatGrid';
-import ComparisonCard from '@/components/maintchain/landing/ComparisonCard';
-import ActivityFeed from '@/components/maintchain/landing/ActivityFeed';
-import WorkerProfileCardPreview from '@/components/maintchain/landing/WorkerProfileCardPreview';
-import MachinePassportPreview from '@/components/maintchain/landing/MachinePassportPreview';
-import LeaderboardPreview from '@/components/maintchain/landing/LeaderboardPreview';
-import IndustriesGrid from '@/components/maintchain/landing/IndustriesGrid';
-import FinalCTA from '@/components/maintchain/landing/FinalCTA';
-import Footer from '@/components/maintchain/landing/Footer';
 import FadeInView from '@/components/maintchain/FadeInView';
 import { EditorialSectionHeader } from '@/components/maintchain/ui';
+
+// Lazy-load below-the-fold sections (code-split automatically)
+const TrustReplaySignature = dynamic(
+  () => import('@/components/maintchain/landing/TrustReplaySignature'),
+  { loading: () => <div className="h-64 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const StatGrid = dynamic(
+  () => import('@/components/maintchain/landing/StatGrid'),
+  { loading: () => <div className="h-48 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const ComparisonCard = dynamic(
+  () => import('@/components/maintchain/landing/ComparisonCard'),
+  { loading: () => <div className="h-64 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const ActivityFeed = dynamic(
+  () => import('@/components/maintchain/landing/ActivityFeed'),
+  { loading: () => <div className="h-96 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const WorkerProfileCardPreview = dynamic(
+  () => import('@/components/maintchain/landing/WorkerProfileCardPreview'),
+  { loading: () => <div className="h-64 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const MachinePassportPreview = dynamic(
+  () => import('@/components/maintchain/landing/MachinePassportPreview'),
+  { loading: () => <div className="h-64 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const IndustriesGrid = dynamic(
+  () => import('@/components/maintchain/landing/IndustriesGrid'),
+  { loading: () => <div className="h-48 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const LeaderboardPreview = dynamic(
+  () => import('@/components/maintchain/landing/LeaderboardPreview'),
+  { loading: () => <div className="h-64 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const FinalCTA = dynamic(
+  () => import('@/components/maintchain/landing/FinalCTA'),
+  { loading: () => <div className="h-48 animate-pulse bg-white/50 rounded-2xl" /> }
+);
+const Footer = dynamic(
+  () => import('@/components/maintchain/landing/Footer'),
+  { loading: () => <div className="h-32 animate-pulse bg-white/50 rounded-2xl" /> }
+);
 
 export default function MaintChainHome() {
   const { walletError, networkError } = useSoroban();

@@ -502,7 +502,8 @@ AUTH_SECRET=<random_hmac_secret>  # For signing session cookies
 ```env
 # Backend
 MAINTCHAIN_API_KEY=<shared_secret>  # Must match frontend
-SENTRY_DSN=                         # Optional, Sentry is no-op if unset
+GLITCHTIP_DSN=https://d50984aebbe547c1af84ff919ccedb62@app.glitchtip.com/27052
+GLITCHTIP_ENVIRONMENT=production
 ```
 
 ### 6.7 Auth-Exempt Routes

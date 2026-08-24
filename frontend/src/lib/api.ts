@@ -23,6 +23,7 @@ import type {
   VerificationResponse,
   ApiErrorResponse,
 } from './api-types';
+import { captureApiError } from './glitchtip';
 
 // The proxy lives at /api/* on the same origin — no NEXT_PUBLIC_* env var needed
 const BASE_URL = '/api';
@@ -57,6 +58,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     } catch {
       // Body is not JSON — use status text
     }
+
+    // Report 5xx server errors to GlitchTip (not 4xx client errors)
+    captureApiError(new ApiError(res.status, code, message), {
+      method: options?.method || 'GET',
+      route: path,
+      statusCode: res.status,
+      environment: process.env.NODE_ENV || 'production',
+    });
 
     throw new ApiError(res.status, code, message);
   }

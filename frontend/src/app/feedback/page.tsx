@@ -4,6 +4,7 @@ import { useState } from 'react';
 import FadeInView from '@/components/maintchain/FadeInView';
 import { EditorialSectionHeader, StatusBadge } from '@/components/maintchain/ui';
 import { useSoroban } from '@/hooks/useSoroban';
+import { trackFeedbackSubmitted } from '@/lib/analytics';
 import {
   MessageSquare,
   Star,
@@ -74,7 +75,7 @@ export default function FeedbackPage() {
     setError(null);
 
     try {
-      // Post to the feedback API — using Sentry capture for now
+      // Post to the feedback API — captures to GlitchTip
       await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -90,10 +91,10 @@ export default function FeedbackPage() {
           approval_logic_feedback: approvalLogicFeedback.trim() || undefined,
         }),
       }).catch(() => {
-        // Silent fallback — Sentry may not be configured locally
+        // Silent fallback — GlitchTip may not be configured locally
       });
 
-      // Also try to send to Sentry's User Feedback API
+      // Also try to send to GlitchTip's User Feedback API
       const Sentry = (await import('@sentry/nextjs')).default;
       try {
         const eventId = Sentry.captureMessage(`Feedback: ${category}`, {
@@ -120,9 +121,10 @@ export default function FeedbackPage() {
           comments: `[${category}] Rating: ${rating}/5 — ${message}`,
         });
       } catch {
-        // Sentry feedback is optional
+        // GlitchTip feedback is optional
       }
 
+      trackFeedbackSubmitted({ category, rating });
       setSubmitted(true);
     } catch {
       setError('Failed to submit feedback. Please try again.');

@@ -5,6 +5,8 @@ import { DetailPanel, EditorialSectionHeader, StatusBadge } from '@/components/m
 import WalletConnectPanel from '@/components/WalletConnectPanel';
 import { useSoroban } from '@/hooks/useSoroban';
 import { api, ApiError } from '@/lib/api';
+import { captureTransactionEvent } from '@/lib/glitchtip';
+import { trackApprovalPageEntered, trackApprovalRecordsLoaded, trackApprovalInitiated, trackApprovalAction, trackApprovalFailed } from '@/lib/analytics';
 import type { MaintenanceResponse } from '@/lib/api-types';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toBytesN32, pollTransactionStatus } from '@/lib/soroban';
@@ -43,11 +45,19 @@ export default function ApprovalCenter() {
     },
   });
 
+  // Track page entry
+  useEffect(() => {
+    trackApprovalPageEntered();
+  }, []);
+
   useEffect(() => {
     if (!isConnected) return;
     setLoading(true);
     api.listPendingApprovals()
-      .then(setRecords)
+      .then((data) => {
+        setRecords(data);
+        trackApprovalRecordsLoaded({ count: data.length });
+      })
       .catch((err) => {
         console.error('Failed to load pending approvals:', err);
       })
@@ -126,6 +136,7 @@ export default function ApprovalCenter() {
     setProcessingId(id);
     setProcessingAction('approve');
     timeoutContextRef.current = null;
+    trackApprovalInitiated({ action: 'approve' });
 
     try {
       // Validate on-chain configuration is available
@@ -161,6 +172,7 @@ export default function ApprovalCenter() {
         const onChainTx = txResult.transactionHash;
 
         txStateMachine.transition(TxState.CONFIRMED, { hash: onChainTx });
+        captureTransactionEvent('transaction_confirmation', { network: 'testnet', contractType: 'MultiPartyApproval', contractId: MULTI_PARTY_APPROVAL_ID, method: 'approve_by_supervisor', status: 'confirmed', transactionHash: onChainTx });
 
         // On-chain succeeded — now record in backend (DB mirror)
         txStateMachine.transition(TxState.DATABASE_SYNC);
@@ -170,6 +182,7 @@ export default function ApprovalCenter() {
         });
 
         txStateMachine.transition(TxState.COMPLETE, { hash: onChainTx });
+        trackApprovalAction({ role: 'supervisor', action: 'approve' });
         setTxHash(`Record ${id} → Status: ${result.status} | On-chain: ${onChainTx.slice(0, 12)}...`);
         setRecords(prev => prev.filter(r => r.maintenance_id !== id));
       }
@@ -179,7 +192,9 @@ export default function ApprovalCenter() {
       // don't downgrade it to a generic RPC error or show the red failure banner.
       const isTimeout = (e as { isTxTimeout?: boolean })?.isTxTimeout === true;
       if (!isTimeout) {
+        captureTransactionEvent('transaction_failure', { network: 'testnet', contractType: 'MultiPartyApproval', contractId: MULTI_PARTY_APPROVAL_ID, method: 'approve_by_supervisor', error: message });
         txStateMachine.setError(TxState.RPC_ERROR, message);
+        trackApprovalFailed({ action: 'approve', error: message });
         setError(message);
       }
     } finally {
@@ -194,6 +209,7 @@ export default function ApprovalCenter() {
     setProcessingId(id);
     setProcessingAction('reject');
     timeoutContextRef.current = null;
+    trackApprovalInitiated({ action: 'reject' });
 
     try {
       // Validate on-chain configuration is available
@@ -227,6 +243,7 @@ export default function ApprovalCenter() {
         const onChainTx = txResult.transactionHash;
 
         txStateMachine.transition(TxState.CONFIRMED, { hash: onChainTx });
+        captureTransactionEvent('transaction_confirmation', { network: 'testnet', contractType: 'MultiPartyApproval', contractId: MULTI_PARTY_APPROVAL_ID, method: 'reject_by_supervisor', status: 'confirmed', transactionHash: onChainTx });
 
         // On-chain succeeded — now record in backend (DB mirror)
         txStateMachine.transition(TxState.DATABASE_SYNC);
@@ -236,6 +253,7 @@ export default function ApprovalCenter() {
         });
 
         txStateMachine.transition(TxState.COMPLETE, { hash: onChainTx });
+        trackApprovalAction({ role: 'supervisor', action: 'reject' });
         setTxHash(`Record ${id} → Status: ${result.status} | On-chain: ${onChainTx.slice(0, 12)}...`);
         setRecords(prev => prev.filter(r => r.maintenance_id !== id));
       }
@@ -243,7 +261,9 @@ export default function ApprovalCenter() {
       const message = e instanceof ApiError ? `${e.code}: ${e.message}` : String(e);
       const isTimeout = (e as { isTxTimeout?: boolean })?.isTxTimeout === true;
       if (!isTimeout) {
+        captureTransactionEvent('transaction_failure', { network: 'testnet', contractType: 'MultiPartyApproval', contractId: MULTI_PARTY_APPROVAL_ID, method: 'reject_by_supervisor', error: message });
         txStateMachine.setError(TxState.RPC_ERROR, message);
+        trackApprovalFailed({ action: 'reject', error: message });
         setError(message);
       }
     } finally {

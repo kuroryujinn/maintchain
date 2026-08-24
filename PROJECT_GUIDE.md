@@ -183,7 +183,7 @@ External parties who need to verify compliance without relying on any single org
 | **Styling** | Tailwind CSS v4 | Editorial + Glass design system |
 | **Wallet** | Freighter Browser Extension | Stellar key management & transaction signing |
 | **Authentication** | SEP-53 challenge-response | Wallet signature verification ↦ HMAC session cookie |
-| **Monitoring** | Sentry | Error tracking & performance monitoring |
+| **Monitoring** | GlitchTip | Error tracking & performance monitoring (Sentry-compatible SDK) |
 | **Hosting** | Vercel (frontend) + Render (backend) | Production deployment |
 
 ---
@@ -200,7 +200,7 @@ External parties who need to verify compliance without relying on any single org
 - ✅ Multi-party approval workflow (technician → supervisor → auditor)
 - ✅ Compliance attestation with on-chain certificate issuance
 - ✅ Mobile responsive UI with glass design system
-- ✅ Sentry error tracking (frontend + backend)
+- ✅ GlitchTip error tracking (frontend + backend, Sentry-compatible SDK)
 - ✅ User feedback collection widget
 - ✅ **User Registration UI** — `/register` page with wallet connect + role selection
 - ✅ **User Directory** — `/users` page with real-time user list and search/filter

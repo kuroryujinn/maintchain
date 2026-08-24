@@ -39,6 +39,12 @@ services:
       # real contract ID instead of 'unknown'.
       - key: IDENTITY_REGISTRY_CONTRACT_ID
         sync: false
+      # ── Error Tracking (GlitchTip) ──
+      # Uses the same project DSN as the frontend (Sentry-compatible SDK).
+      - key: GLITCHTIP_DSN
+        value: https://d50984aebbe547c1af84ff919ccedb62@app.glitchtip.com/27052
+      - key: GLITCHTIP_ENVIRONMENT
+        value: production
       # DATABASE_URL intentionally omitted — managed via hardcoded fallback in main.rs
       # to avoid Render blueprint env var conflicts.
       # Do NOT set PORT — Render injects its own.

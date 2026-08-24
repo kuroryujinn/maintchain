@@ -21,6 +21,7 @@ import {
 
 import { invokeContract, simulateContract, toScVal, bytes32ScVal, TxStatus } from '@/lib/soroban';
 import { xdr } from '@stellar/stellar-sdk';
+import { captureWalletError } from '@/lib/glitchtip';
 
 const FREIGHTER_LOCAL_KEY = 'maintchain:freighter:address';
 const WALLET_CHANGED_EVENT = 'maintchain:soroban-wallet-changed';
@@ -135,6 +136,7 @@ export const useSoroban = () => {
         }
 
         if (rawStr.includes('public') || rawStr.includes('mainnet') || rawStr.includes('passphrase_main')) {
+          captureWalletError('wallet_network_mismatch', `Wallet on mainnet, expected testnet: ${raw}`, { expected: false });
           setNetworkOk(false);
           setNetworkError({
             message: 'Network mismatch: connect a Freighter session for Stellar Testnet.',
@@ -142,6 +144,7 @@ export const useSoroban = () => {
           return false;
         }
 
+        captureWalletError('wallet_network_mismatch', `Unknown network: ${raw}`, { expected: false });
         setNetworkOk(false);
         setNetworkError({
           message: 'Unable to verify Freighter network. Continue only if you are on Stellar Testnet.',
@@ -313,13 +316,12 @@ export const useSoroban = () => {
   const connectWallet = useCallback(async (): Promise<boolean> => {
     setWalletError(null);
     setNetworkError(null);
-    setNetworkOk(true);
-
-    const installed = await detectFreighter();
-    if (!installed) {
-      setWalletError({ message: 'Please install Freighter wallet.' });
-      return false;
-    }
+    setNetworkOk(true);      const installed = await detectFreighter();
+      if (!installed) {
+        captureWalletError('wallet_not_installed', 'Freighter wallet extension not found', { expected: false });
+        setWalletError({ message: 'Please install Freighter wallet.' });
+        return false;
+      }
 
     try {
       const accessResult = await requestAccess();
@@ -341,9 +343,14 @@ export const useSoroban = () => {
       await verifyWallet(authAddress);
       return true;
     } catch (e: any) {
-      setWalletError({
-        message: e?.message ? String(e.message) : 'Freighter connection failed.',
-      });
+      const msg = e?.message ? String(e.message) : 'Freighter connection failed.';
+      const isSigningError = msg.includes('sign') || msg.includes('reject') || msg.includes('denied');
+      captureWalletError(
+        isSigningError ? 'wallet_signing_failed' : 'wallet_connect_failed',
+        msg,
+        { expected: isSigningError },
+      );
+      setWalletError({ message: msg });
       setIsConnected(false);
       setAddress(null);
       persistAddress(null);

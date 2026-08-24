@@ -7,6 +7,8 @@ import { ArrowRight, CheckCircle, ExternalLink, Loader2, AlertTriangle, Wallet, 
 import { useSoroban, IDENTITY_REGISTRY_ID } from '@/hooks/useSoroban';
 import { u32ScVal } from '@/lib/soroban';
 import { api, ApiError } from '@/lib/api';
+import { captureVerificationStage, captureTransactionEvent } from '@/lib/glitchtip';
+import { trackVerificationPageEntered, trackWalletConnectionInitiated, trackWalletConnectionCompleted, trackVerificationStarted, trackVerificationCompleted, trackVerificationFailed } from '@/lib/analytics';
 import type { UserResponse } from '@/lib/api-types';
 import { ALLOWED_ROLES, ROLE_CODES } from '@/lib/roles';
 import { isDuplicateRegistration } from '@/lib/registration-error';
@@ -155,8 +157,12 @@ export default function GetVerifiedPage() {
   // ─── Step 1-2: Connect wallet & check readiness ───
   const handleConnectAndCheck = useCallback(async () => {
     setStep('connecting_wallet');
+    trackWalletConnectionInitiated();
 
     try {
+      captureVerificationStage('verification_started', { network: 'testnet' });
+      trackVerificationStarted({ network: 'testnet' });
+
       // Connect wallet (handles Freighter detection internally).
       // connectWallet now returns true/false so the caller can check the
       // result immediately instead of reading stale state from the closure.
@@ -173,29 +179,37 @@ export default function GetVerifiedPage() {
       }
 
       if (!walletOk || !soroban.address) {
+        captureVerificationStage('verification_failed', { reason: 'wallet_signature_failed' });
+        trackVerificationFailed({ reason: 'wallet_signature_failed' });
         setError('Session Required', 'Wallet signature verification failed. Please reconnect your wallet and approve the signature prompt.');
         return;
       }
 
+      captureVerificationStage('wallet_identified', { walletAddress: soroban.address, network: 'testnet' });
+      trackWalletConnectionCompleted({ network: 'testnet' });
       setStep('wallet_connected');
 
       // Verify network
       if (!soroban.networkOk) {
+        captureVerificationStage('verification_failed', { reason: 'network_mismatch' });
         setError('Wrong Network', 'Please switch your Freighter wallet to Stellar Testnet.');
         return;
       }
 
       // Check backend readiness
       setStep('checking_readiness');
+      captureVerificationStage('user_data_loaded', { walletAddress: soroban.address, network: 'testnet' });
       const readiness = await api.verificationReadiness();
 
       if (!readiness.database_ready) {
+        captureVerificationStage('verification_failed', { reason: 'backend_unavailable' });
         setError('Backend Unavailable', 'The verification backend database is not reachable. Please try again later.');
         return;
       }
 
       if (!readiness.identity_registry_configured) {
         if (!isContractConfigured) {
+          captureVerificationStage('verification_failed', { reason: 'contract_not_configured', network: 'testnet' });
           setError(
             'Contract Not Configured',
             'The IdentityRegistry contract ID is not set in the frontend environment. ' +
@@ -204,6 +218,9 @@ export default function GetVerifiedPage() {
           return;
         }
       }
+
+      captureVerificationStage('contract_config_loaded', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID });
+      captureVerificationStage('contract_id_validated', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID });
 
       // Check or create user
       setStep('checking_user');
@@ -316,6 +333,7 @@ export default function GetVerifiedPage() {
 
       // Step 5: On-chain verification
       setStep('signing_transaction');
+      captureVerificationStage('transaction_constructed', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity' });
       const roleCode = ROLE_CODES[role] ?? 1;
 
       const txResult = await soroban.callContract(
@@ -332,12 +350,15 @@ export default function GetVerifiedPage() {
             switch (status.state) {
               case 'awaiting_signature':
                 setStep('signing_transaction');
+                captureVerificationStage('transaction_signed', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity' });
                 break;
               case 'submitting':
                 setStep('submitting_transaction');
+                captureTransactionEvent('transaction_submission', { network: 'testnet', contractType: 'IdentityRegistry', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity', status: 'submitting' });
                 break;
               case 'pending':
                 setStep('confirming_transaction');
+                captureTransactionEvent('transaction_confirmation', { network: 'testnet', contractType: 'IdentityRegistry', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity', status: 'pending' });
                 break;
               case 'success':
                 // Handled by existing code after callContract returns
@@ -364,6 +385,8 @@ export default function GetVerifiedPage() {
 
       setTxHash(txResult.transactionHash);
       setContractIdDisplay(IDENTITY_REGISTRY_ID);
+      captureVerificationStage('transaction_submitted', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity' });
+      captureTransactionEvent('transaction_confirmation', { network: 'testnet', contractType: 'IdentityRegistry', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity', status: 'confirmed', transactionHash: txResult.transactionHash });
 
       setStep('confirming_transaction');
 
@@ -395,20 +418,36 @@ export default function GetVerifiedPage() {
       }
 
       // Step 7: Success
+      captureVerificationStage('transaction_confirmed', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity' });
+      trackVerificationCompleted({ transactionHash: txResult.transactionHash });
       setStep('success');
     } catch (e: any) {
       const msg = e?.message || String(e);
       if (msg.includes('sign') || msg.includes('reject') || msg.includes('denied')) {
+        captureVerificationStage('verification_failed', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, reason: 'signature_rejected', error: msg });
+        captureTransactionEvent('transaction_failure', { network: 'testnet', contractType: 'IdentityRegistry', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity', error: msg });
+        trackVerificationFailed({ reason: 'signature_rejected' });
         setError('Signature Rejected', 'You rejected the transaction in Freighter. Please try again and approve the signature request.');
       } else if (msg.includes('simulation') || msg.includes('simulate')) {
+        captureVerificationStage('verification_failed', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, reason: 'simulation_failed', error: msg });
+        captureTransactionEvent('transaction_failure', { network: 'testnet', contractType: 'IdentityRegistry', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity', error: msg });
         setError('Simulation Failed', `The contract call simulation failed: ${msg}. Check that the IdentityRegistry contract is deployed.`);
       } else if (msg.includes('timeout') || msg.includes('poll')) {
+        captureVerificationStage('verification_failed', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, reason: 'confirmation_timeout', error: msg });
+        captureTransactionEvent('transaction_failure', { network: 'testnet', contractType: 'IdentityRegistry', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity', error: msg });
         setError('Confirmation Timeout', 'The transaction was submitted but confirmation is taking longer than expected. Check the explorer for status.');
       } else {
+        captureVerificationStage('verification_failed', { walletAddress: soroban.address, network: 'testnet', contractId: IDENTITY_REGISTRY_ID, reason: 'unknown_error', error: msg });
+        captureTransactionEvent('transaction_failure', { network: 'testnet', contractType: 'IdentityRegistry', contractId: IDENTITY_REGISTRY_ID, method: 'verify_identity', error: msg });
         setError('Verification Failed', msg);
       }
     }
   }, [soroban, isContractConfigured, existingUser, name, role, organization, setError]);
+
+  // ─── Track page entry ───
+  useEffect(() => {
+    trackVerificationPageEntered();
+  }, []);
 
   // ─── Auto-connect on mount ───
   // Wait for sessionChecked (set after checkSession completes) to avoid the

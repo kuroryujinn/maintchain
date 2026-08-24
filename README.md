@@ -34,6 +34,8 @@ The gap is not technical capability but **incentive compatibility**: no existing
 
 ### Architecture
 
+![Architecture Diagram](docs/diagrams/architecture.svg)
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser (Next.js 14 + React 18 + Tailwind v4)              │
@@ -129,6 +131,8 @@ See [STELLAR_INTEGRATION.md](./STELLAR_INTEGRATION.md#6-wallet-verification--ses
 | **Progressive trust** | Users start at zero trust and build reputation through verifiable work |
 
 ### Compliance Flow (6 stages)
+
+![Compliance Flow](docs/diagrams/compliance-flow.svg)
 
 ```
 Fault Detected -> Worker Accepts -> Evidence Uploaded

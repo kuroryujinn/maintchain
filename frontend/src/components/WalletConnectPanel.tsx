@@ -1,9 +1,11 @@
 'use client';
 
-import { useMemo } from 'react';
-import { Lock, ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Lock, ShieldCheck, ShieldAlert, Loader2, User } from 'lucide-react';
 
 import { useSoroban } from '@/hooks/useSoroban';
+import { api } from '@/lib/api';
+import type { UserResponse } from '@/lib/api-types';
 
 type WalletConnectPanelProps = {
   compact?: boolean;
@@ -24,6 +26,27 @@ export default function WalletConnectPanel({ compact = false, className = '' }: 
     sessionVerifying,
     sessionError,
   } = useSoroban();
+
+  const [userName, setUserName] = useState<string | null>(null);
+
+  // Fetch the user's registered name when connected
+  useEffect(() => {
+    if (!isConnected || !address) {
+      setUserName(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const user: UserResponse = await api.getUserByStellar(address);
+        if (!cancelled) setUserName(user.name);
+      } catch {
+        // 404 = not registered yet; any other error = ignore
+        if (!cancelled) setUserName(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isConnected, address]);
 
   const truncatedAddress = useMemo(() => {
     if (!address) return '';
@@ -70,8 +93,10 @@ export default function WalletConnectPanel({ compact = false, className = '' }: 
             </div>
 
             <div className="hidden sm:flex flex-col items-end text-right">
-              <span className="text-xs uppercase tracking-[0.24em] text-slate-400">Freighter</span>
-              <span className="font-mono text-sm text-white/90">{truncatedAddress}</span>
+              {userName && (
+                <span className="text-xs font-medium text-white/80">{userName}</span>
+              )}
+              <span className="font-mono text-xs text-white/60">{truncatedAddress}</span>
             </div>
             <button
               onClick={disconnectWallet}
@@ -134,6 +159,12 @@ export default function WalletConnectPanel({ compact = false, className = '' }: 
           <p className="mt-2 text-sm font-medium text-[var(--text-primary)]">
             {isConnected ? 'Connected' : 'Waiting for wallet'}
           </p>
+          {userName && (
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-[var(--text-primary)]">
+              <User className="h-3 w-3 text-[var(--text-secondary)]" />
+              {userName}
+            </p>
+          )}
           <p className="mt-1 font-mono text-xs text-[var(--text-secondary)]">{truncatedAddress || 'No address yet'}</p>
         </div>
 

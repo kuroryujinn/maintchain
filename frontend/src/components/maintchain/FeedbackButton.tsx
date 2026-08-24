@@ -95,8 +95,8 @@ export default function FeedbackButton() {
         },
       });
 
-      // If Sentry has a DSN configured, also use the User Feedback API
-      if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      // If GlitchTip has a DSN configured, also use the User Feedback API
+      if (process.env.NEXT_PUBLIC_GLITCHTIP_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN) {
         try {
           await Sentry.captureUserFeedback({
             event_id: eventId,

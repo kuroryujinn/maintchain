@@ -5,8 +5,11 @@ import { GeistSans } from 'geist/font/sans';
 import Nav from '@/components/maintchain/Nav';
 import RouteShell from '@/components/maintchain/RouteShell';
 import SentryErrorBoundary from '@/components/maintchain/SentryErrorBoundary';
+import GlitchTipInit from '@/components/maintchain/GlitchTipInit';
+import WebVitalsInit from '@/components/maintchain/WebVitalsInit';
 import FeedbackButton from '@/components/maintchain/FeedbackButton';
 import TechnicalPreviewBanner from '@/components/maintchain/TechnicalPreviewBanner';
+import AnalyticsProvider from '@/components/maintchain/AnalyticsProvider';
 import { cn } from "@/lib/utils";
 
 const geist = GeistSans;
@@ -28,18 +31,22 @@ export default function RootLayout({
   return (
     <html lang="en" className={cn(interTight.variable, inter.variable, jetbrainsMono.variable, "font-sans", geist.variable)}>
       <body className={`${inter.className} min-h-screen bg-slate-100 text-slate-900`}>
-        <SentryErrorBoundary>
-          <Nav />
-          <RouteShell>
-            <main className="mx-auto max-w-7xl px-4 pb-20 pt-24 sm:px-6 lg:px-8">
-              <div className="-mx-4 sm:-mx-6 lg:-mx-8">
-                <TechnicalPreviewBanner />
-              </div>
-              {children}
-            </main>
-          </RouteShell>
-        </SentryErrorBoundary>
-        <FeedbackButton />
+        <AnalyticsProvider>
+          <WebVitalsInit />
+          <GlitchTipInit />
+          <SentryErrorBoundary>
+            <Nav />
+            <RouteShell>
+              <main className="mx-auto max-w-7xl px-4 pb-20 pt-24 sm:px-6 lg:px-8">
+                <div className="-mx-4 sm:-mx-6 lg:-mx-8">
+                  <TechnicalPreviewBanner />
+                </div>
+                {children}
+              </main>
+            </RouteShell>
+          </SentryErrorBoundary>
+          <FeedbackButton />
+        </AnalyticsProvider>
       </body>
     </html>
   );

@@ -255,7 +255,7 @@ It is the **entry point for the Get Verified flow** (`/get-verified`). A user's 
 #### 3.2.2 Key Backend Components
 
 **Axum Router** (`main.rs`):
-- Configures all routes, CORS middleware, Sentry integration
+- Configures all routes, CORS middleware, GlitchTip integration
 - Manages database connection pool via sqlx
 - Handles request/response serialization
 
@@ -426,7 +426,7 @@ All Approvals Complete → Auditor clicks "Issue Certificate"
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  maintchain.vercel.app                                │  │
 │  │  Next.js 14 (SSG + Client Components)                 │  │
-│  │  Sentry SDK (error tracking + performance)            │  │
+│  │  GlitchTip SDK (error tracking + performance)        │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                    │                                         │
 │                    │ HTTPS (fetch)                           │
@@ -435,7 +435,7 @@ All Approvals Complete → Auditor clicks "Issue Certificate"
 │  │  Render (Docker)                                      │  │
 │  │  maintchain-backend                                   │  │
 │  │  Rust Axum API :8081                                  │  │
-│  │  Sentry SDK (server-side)                             │  │
+│  │  GlitchTip SDK (server-side)                         │  │
 │  │  Health check: /health                                │  │
 │  └──────────────┬────────────────────────────────────────┘  │
 │                  │                                           │

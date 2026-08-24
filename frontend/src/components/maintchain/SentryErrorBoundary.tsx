@@ -36,10 +36,12 @@ export default class SentryErrorBoundary extends Component<ErrorBoundaryProps, E
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Report the error to Sentry with component stack trace
+    // Report the error to GlitchTip with component stack trace and app context
     Sentry.withScope((scope) => {
       scope.setExtra('componentStack', errorInfo.componentStack ?? '');
       scope.setTag('error-boundary', 'root');
+      scope.setTag('error_category', 'react');
+      scope.setTag('application', 'maintchain');
       Sentry.captureException(error);
     });
   }
