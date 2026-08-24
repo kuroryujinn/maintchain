@@ -1,61 +1,94 @@
-# Environment variables
+# ══════════════════════════════════════════════════════════════
+# MaintChain .gitignore
+# ══════════════════════════════════════════════════════════════
+
+# ── Environment / Secrets ───────────────────────────────────
 .env
 .env.*
+!.env.example
+!.env.smoke.example
 
-# Ignore all Markdown files except README.md
+# ── Documentation (keep only essential Markdown) ─────────────
 *.md
 !README.md
 !PROJECT_GUIDE.md
 !STELLAR_INTEGRATION.md
 !SYSTEM_DESIGN.md
-docs/ONBOARDING.md
 !docs/ONBOARDING.md
-docs/STELLAR_TRANSACTION_FLOW_ANALYSIS.md
 !docs/STELLAR_TRANSACTION_FLOW_ANALYSIS.md
-
 SYSTEM_DESIGN_DIAGRAM.html
 
-# Node
+# ── Node ────────────────────────────────────────────────────
 node_modules/
 .next/
-node_modules/
-target/
-.next/
-dist/
-build/
-# Rust
-target/
-
-# Build files
 dist/
 build/
 *.tsbuildinfo
 
-# Environment
-*.env
+# ── Rust ────────────────────────────────────────────────────
+target/
 
-# Logs
+# ── IDE / OS ────────────────────────────────────────────────
+.vscode/
+.idea/
+*.pdb
+.vercel
+.worktrees/
+nul
+frontend/nul
+
+# ── Logs ────────────────────────────────────────────────────
 *.log
 
-# Windows
-*.pdb
+# ── Local Freebuff Database ────────────────────────────────
+.freebuff/
 
-# IDE
-.vscode/
-.idea/frontend/nul
-frontend/nul
-/nul
-.vercel
-.env*
-!.env.example
-.worktrees/
+# ── Playwright Test Artifacts ───────────────────────────────
+frontend/playwright-output/
+frontend/test-results/
+test-results/
+playwright-report/
+*.trace
+*.webm
 
-# Synthetic user test harness (STRICT — secrets + state)
-scripts/synthetic-users/.tmp/
-scripts/synthetic-users/.tmp/**
+# ── Generated Test Reports ──────────────────────────────────
+tests/smoke/smoke-report.json
+tests/smoke/blockchain-report.json
+tests/smoke/playwright-report.json
+frontend/playwright-report.json
+frontend/bundle-report.html
+frontend/lighthouse-report.json
+
+# ── Duplicate Playwright Configs (canonical: tests/smoke/) ──
+frontend/playwright.config.ts
+frontend/browser-routes.browser.test.ts
+
+# ── Root-level package files (frontend-only project) ────────
+package.json
+package-lock.json
+
+# ── Generated Smoke Test Data ───────────────────────────────
+tests/**/.env*
+tests/**/generated/
+tests/**/artifacts/
+
+# ── Local Blockchain/Testnet Wallets ────────────────────────
+testnet-wallets/
+generated-wallets/
+smoke-wallets/
+test-wallets/
+testnet-accounts/
 *.secret
 *.key
 
-# Production smoke test secrets
-.env.smoke
-smoke-report.json
+# ── Synthetic User Bot (non-required) ───────────────────────
+# Multiple-Testnet-user bot — NOT used by CI or production verification.
+# Local development utility only. Kept locally, not tracked.
+scripts/synthetic-users/
+
+# ── Non-required Test Scripts (not used by CI) ──────────────
+# These are local development/testing utilities, not required for
+# production verification or CI pipelines.
+scripts/test-integration.mjs
+scripts/test-setup.mjs
+scripts/soroban-invoke.mjs

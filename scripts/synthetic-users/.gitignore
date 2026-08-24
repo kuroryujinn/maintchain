@@ -1,8 +1,0 @@
-# Synthetic user state files — NEVER commit
-.tmp/
-*.secret
-*.key
-wallets.json
-verified-wallets.json
-registration-results.json
-verification-results.json
