@@ -7,11 +7,21 @@ import Link from 'next/link';
 const BANNER_DISMISSED_KEY = 'maintchain:tech-preview-banner-dismissed';
 
 export default function TechnicalPreviewBanner() {
+  // Start with a neutral state — no layout shift in either direction.
+  // We mount nothing on SSR, then check localStorage on the client.
+  // This avoids CLS from a banner that appears then disappears.
   const [visible, setVisible] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const dismissed = localStorage.getItem(BANNER_DISMISSED_KEY);
-    if (!dismissed) setVisible(true);
+    setMounted(true);
+    try {
+      const dismissed = localStorage.getItem(BANNER_DISMISSED_KEY);
+      if (!dismissed) setVisible(true);
+    } catch {
+      // localStorage unavailable — show banner by default (safe fallback)
+      setVisible(true);
+    }
   }, []);
 
   const dismiss = () => {
@@ -19,7 +29,9 @@ export default function TechnicalPreviewBanner() {
     try { localStorage.setItem(BANNER_DISMISSED_KEY, '1'); } catch { /* noop */ }
   };
 
-  if (!visible) return null;
+  // Reserve the same space as the banner even when hidden, to prevent CLS
+  // from the banner appearing/disappearing after hydration.
+  if (!mounted || !visible) return <div className="h-[52px]" aria-hidden="true" />;
 
   return (
     <div

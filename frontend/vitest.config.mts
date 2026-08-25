@@ -17,6 +17,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'tests/smoke/**/*.test.ts'],
+    exclude: ['**/node_modules/**', '**/tests/smoke/*.browser.test.ts'],
   },
 });

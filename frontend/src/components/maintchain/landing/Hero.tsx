@@ -1,10 +1,11 @@
-'use client';
-
 import Link from 'next/link';
 import { ArrowRight, FlaskConical } from 'lucide-react';
 
-import FadeInView from '@/components/maintchain/FadeInView';
-
+/**
+ * Hero — server component (no 'use client').
+ * Renders immediately without client-side JS, ensuring fast LCP.
+ * Wallet errors are handled by the parent page, not here.
+ */
 export default function Hero() {
   return (
     <section aria-label="Hero" className="relative mx-auto max-w-7xl px-4">
@@ -98,7 +99,7 @@ export default function Hero() {
         </div>
 
         {/* Right: visual trust network with dramatic glow */}
-        <FadeInView direction="right" distance="md" duration={500} delay={80} className="relative overflow-hidden glass-glow-blue p-6">
+        <div className="relative overflow-hidden glass-glow-blue p-6">
           {/* Blue glow behind the panel */}
           <div
             aria-hidden="true"
@@ -292,7 +293,7 @@ export default function Hero() {
               </div>
             </div>
           </div>
-        </FadeInView>
+        </div>
       </div>
     </section>
   );

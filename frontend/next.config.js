@@ -24,6 +24,42 @@ const nextConfig = {
           },
         ],
       },
+      {
+        // Content Security Policy — built from actual application dependencies.
+        // GlitchTip/Sentry is tunneled via /monitoring, so no external connect needed.
+        // PostHog loads from app.posthog.com; Stellar from testnet endpoints.
+        // Freighter wallet is a browser extension (no external origin needed).
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              // Next.js injects inline scripts for hydration and RSC
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              // Tailwind CSS + Next.js inject inline styles
+              "style-src 'self' 'unsafe-inline'",
+              // Images: self, data URIs, blob (for canvas), Google Fonts
+              "img-src 'self' data: blob: https://fonts.gstatic.com",
+              // Fonts: Google Fonts (self-hosted via next/font, but fallback)
+              "font-src 'self' https://fonts.gstatic.com",
+              // API connections: backend proxy, Stellar RPC, Horizon, PostHog analytics,
+              // Sentry tunnel (same-origin /monitoring)
+              "connect-src 'self' https://soroban-testnet.stellar.org https://horizon-testnet.stellar.org https://app.posthog.com https://us.i.posthog.com https://eu.i.posthog.com",
+              // No iframes
+              "frame-src 'none'",
+              // No plugins
+              "object-src 'none'",
+              // Restrict base URI
+              "base-uri 'self'",
+              // Form submissions only to self
+              "form-action 'self'",
+              // Prevent framing by other sites
+              "frame-ancestors 'none'",
+            ].join('; '),
+          },
+        ],
+      },
     ];
   },
   webpack: (config, { isServer }) => {

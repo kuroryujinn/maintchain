@@ -59,16 +59,20 @@ frontend/playwright-report.json
 frontend/bundle-report.html
 frontend/lighthouse-report.json
 
-# ── Duplicate Playwright Configs (canonical: tests/smoke/) ──
-frontend/playwright.config.ts
+# ── Duplicate Playwright Configs (canonical: frontend/) ─────
 frontend/browser-routes.browser.test.ts
+frontend/tests/smoke/playwright-report.json
+tests/smoke/browser-routes.browser.test.ts
+tests/smoke/playwright.config.ts
 
 # ── Root-level package files (frontend-only project) ────────
 package.json
 package-lock.json
 
 # ── Generated Smoke Test Data ───────────────────────────────
+# Real env files stay ignored; the committed template stays trackable.
 tests/**/.env*
+!tests/smoke/.env.smoke.example
 tests/**/generated/
 tests/**/artifacts/
 

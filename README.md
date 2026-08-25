@@ -686,6 +686,8 @@ MaintChain is currently in its Technical Preview phase. Users are encouraged to 
 
 - **CI** (`.github/workflows/ci.yml`): TypeScript lint + test + build, Rust check + build, contract tests + WASM build, plus guards for migration placement/numbering, role-list drift, contract workspace membership, and deploy-script ↔ workspace references
 - **Deploy** (`.github/workflows/deploy.yml`): Vercel prebuilt flow on push to `main`; Render deploy hook for backend
+- **Lighthouse CI** (`.github/workflows/lighthouse.yml`): Performance/SEO/best-practices audits on PRs and pushes to `main`
+- **Production Smoke Test** (`.github/workflows/production-smoke.yml`): HTTP + Playwright browser smoke tests against the deployed production app (weekly schedule + manual trigger). A standalone on-chain connectivity/contract-verification script is also provided at `tests/smoke/blockchain-verify.mjs`
 
 **Environment variables required in GitHub Secrets:**
 

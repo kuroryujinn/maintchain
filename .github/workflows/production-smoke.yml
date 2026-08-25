@@ -1,7 +1,7 @@
 # MaintChain Production Smoke Test
 # Manual or scheduled production verification.
 #
-# This workflow runs the smoke test suite against the deployed production application.
+# This workflow runs the complete smoke test suite against the deployed production application.
 # It does NOT deploy or modify the production environment.
 #
 # Usage:
@@ -23,13 +23,18 @@ on:
         required: false
         type: boolean
         default: false
+      enable_browser:
+        description: 'Enable Playwright browser tests'
+        required: false
+        type: boolean
+        default: true
   schedule:
     # Weekly on Sundays at 06:00 UTC
     - cron: '0 6 * * 0'
 
 jobs:
-  smoke-test:
-    name: Production Smoke Test
+  http-smoke-test:
+    name: HTTP Smoke Test
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -44,7 +49,7 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm ci
 
-      - name: Run smoke tests
+      - name: Run HTTP smoke tests
         env:
           SMOKE_BASE_URL: ${{ inputs.base_url || 'https://maintchain.vercel.app' }}
           SMOKE_ENVIRONMENT: production
@@ -59,7 +64,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-report-${{ github.run_id }}
+          name: http-smoke-report-${{ github.run_id }}
           path: tests/smoke/smoke-report.json
           retention-days: 30
 
@@ -67,7 +72,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/smoke/smoke-report.json ]; then
-            echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "## HTTP Smoke Test Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             cat tests/smoke/smoke-report.json | node -e "
               const fs = require('fs');
@@ -83,4 +88,76 @@ jobs:
               console.log('| Blocked | ' + data.summary.blocked + ' |');
               console.log('| Result | **' + data.finalResult + '** |');
             " >> $GITHUB_STEP_SUMMARY
+          fi
+
+  browser-smoke-test:
+    name: Browser Smoke Test (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ inputs.enable_browser != false }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Install Playwright browsers
+        run: cd frontend && npx playwright install chromium --with-deps
+
+      - name: Run Playwright browser smoke tests
+        env:
+          SMOKE_BASE_URL: ${{ inputs.base_url || 'https://maintchain.vercel.app' }}
+        run: cd frontend && npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            frontend/test-results/
+            frontend/tests/smoke/playwright-report.json
+          retention-days: 30
+
+      - name: Report browser test result
+        if: always()
+        run: |
+          echo "## Browser Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f frontend/tests/smoke/playwright-report.json ]; then
+            cat frontend/tests/smoke/playwright-report.json | node -e "
+              const fs = require('fs');
+              const data = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
+              const suites = data.suites || [];
+              let passed = 0, failed = 0, skipped = 0;
+              function count(specs) {
+                for (const s of specs) {
+                  if (s.tests) for (const t of s.tests) {
+                    for (const r of (t.results || [])) {
+                      if (r.status === 'passed') passed++;
+                      else if (r.status === 'failed' || r.status === 'timedOut') failed++;
+                      else skipped++;
+                    }
+                  }
+                }
+              }
+              for (const suite of suites) {
+                count(suite.specs || []);
+                for (const child of (suite.suites || [])) count(child.specs || []);
+              }
+              console.log('| Metric | Value |');
+              console.log('|--------|-------|');
+              console.log('| Passed | ' + passed + ' |');
+              console.log('| Failed | ' + failed + ' |');
+              console.log('| Skipped | ' + skipped + ' |');
+              console.log('| Result | **' + (failed === 0 ? 'PASS' : 'FAIL') + '** |');
+            " >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No Playwright report found." >> $GITHUB_STEP_SUMMARY
           fi

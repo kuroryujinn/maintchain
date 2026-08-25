@@ -10,6 +10,8 @@
     "test": "vitest run",
     "smoke": "node ../tests/smoke/smoke-runner.mjs",
     "smoke:api": "cd .. && npx vitest run tests/smoke/api-health.test.ts",
+    "smoke:browser": "npx playwright test",
+    "smoke:production:browser": "SMOKE_BASE_URL=https://maintchain.vercel.app npx playwright test",
     "analyze": "ANALYZE=true npm run build"
   },
   "dependencies": {
@@ -32,6 +34,7 @@
     "web-vitals": "^6.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
