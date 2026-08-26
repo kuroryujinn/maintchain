@@ -62,6 +62,13 @@ export default function FinalCTA() {
           >
             Explore Network <ArrowRight className="h-4 w-4" />
           </Link>
+
+          <Link
+            href="/docs"
+            className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-6 py-3 text-sm font-medium text-blue-200 backdrop-blur-sm transition-all duration-200 hover:bg-white/10 hover:text-white hover:-translate-y-0.5"
+          >
+            Documentation
+          </Link>
         </div>
       </div>
     </FadeInView>
