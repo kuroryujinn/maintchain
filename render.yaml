@@ -45,8 +45,21 @@ services:
         value: https://d50984aebbe547c1af84ff919ccedb62@app.glitchtip.com/27052
       - key: GLITCHTIP_ENVIRONMENT
         value: production
-      # DATABASE_URL intentionally omitted — managed via hardcoded fallback in main.rs
-      # to avoid Render blueprint env var conflicts.
+      # ── Database ──
+      # PostgreSQL connection string. Required for the backend to start.
+      # Set in Render Dashboard → Environment Variables (contains credentials).
+      - key: DATABASE_URL
+        sync: false
+      # ── API Authentication ──
+      # Shared secret between the Next.js frontend proxy and the Rust backend.
+      # Set in Render Dashboard → Environment Variables.
+      - key: MAINTCHAIN_API_KEY
+        sync: false
+      # ── CORS Origins ──
+      # Comma-separated list of allowed frontend origins.
+      # Set in Render Dashboard → Environment Variables.
+      - key: ALLOWED_ORIGINS
+        sync: false
       # Do NOT set PORT — Render injects its own.
       # The backend reads $PORT from environment, falls back to 8081.
       # Dockerfile at repo root: build context is the repo itself.

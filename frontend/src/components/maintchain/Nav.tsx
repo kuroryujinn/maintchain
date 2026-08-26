@@ -29,6 +29,10 @@ const communityNav = [
   { href: '/feedback', label: 'Feedback' },
 ];
 
+// Secondary navigation: uncommon/workflow/community pages only.
+// Primary nav routes are excluded — they already appear in the top bar on desktop.
+const secondaryNav = [...workflowNav, ...communityNav];
+
 export default function Nav() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -106,7 +110,7 @@ export default function Nav() {
 
         <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
           <div className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 py-2 text-sm text-slate-300 sm:px-6 lg:px-8">
-            {[...primaryNav, ...workflowNav, ...communityNav].map((item) => (
+            {secondaryNav.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -138,7 +142,7 @@ export default function Nav() {
               </button>
             </div>
             <nav className="p-4 space-y-1 overflow-y-auto max-h-[calc(100vh-80px)]">
-              {[...primaryNav, ...workflowNav, ...communityNav].map((item) => (
+              {[...primaryNav, ...secondaryNav].map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

@@ -100,16 +100,28 @@ const nextConfig = {
 // - Error tracking instrumentation
 // - Performance monitoring
 //
+// Only apply Sentry wrapper when a DSN is configured.
+// Without this guard, the SDK is always bundled and logs
+// "Invalid Sentry Dsn" warnings when the env var is unset.
+//
 // Source maps are uploaded to GlitchTip via glitchtip-cli in CI/CD,
 // NOT via the Sentry Webpack Plugin (which requires SENTRY_AUTH_TOKEN).
-module.exports = withSentryConfig(nextConfig, {
-  silent: !process.env.CI, // Only verbose in CI
-  widenClientFileUpload: true,
-  tunnelRoute: "/monitoring",
-  hideSourceMaps: true,
-  disableLogger: true,
-  // Disable the Sentry Webpack Plugin for source map upload —
-  // GlitchTip CLI handles this instead.
-  disableServerWebpackPlugin: true,
-  disableClientWebpackPlugin: true,
-});
+const hasSentryDsn =
+  !!process.env.NEXT_PUBLIC_GLITCHTIP_DSN ||
+  !!process.env.NEXT_PUBLIC_SENTRY_DSN ||
+  !!process.env.GLITCHTIP_DSN ||
+  !!process.env.SENTRY_DSN;
+
+module.exports = hasSentryDsn
+  ? withSentryConfig(nextConfig, {
+      silent: !process.env.CI, // Only verbose in CI
+      widenClientFileUpload: true,
+      tunnelRoute: "/monitoring",
+      hideSourceMaps: true,
+      disableLogger: true,
+      // Disable the Sentry Webpack Plugin for source map upload —
+      // GlitchTip CLI handles this instead.
+      disableServerWebpackPlugin: true,
+      disableClientWebpackPlugin: true,
+    })
+  : nextConfig;
